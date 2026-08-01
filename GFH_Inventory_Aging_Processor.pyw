@@ -132,11 +132,27 @@ KEEP_COLUMNS  = ["District","Store","Product Desc Full","Serial 1","Age in Compa
 BLOCKED_IMEIS = {"358975210745726","350776860110726","358975210799012",
                  "358975210797339","354709280259373","358975210792793",""," "}
 
-# District list (order shown in the Settings dialog). No emails are hardcoded
-# any more — contacts (name + email) are entered once in the app's Settings
-# dialog and saved to CONTACTS_CONFIG_FILE, next to this script/exe.
-DISTRICTS = ["Arizona", "Houston", "Louisiana", "Colorado West", "Colorado East", "Tennessee"]
 CONTACTS_CONFIG_FILE = "gfh_aging_contacts.json"
+
+# Used only to seed gfh_aging_contacts.json the very first time it's created.
+# Everything here is editable (and district rows are addable/removable) from
+# the app's Settings dialog afterward — this is just the starting point.
+_DEFAULT_SENDER = {
+    "sender_name": "Abad Umair Channa",
+    "sender_email": "[REDACTED]",
+    "sender_title": "Senior Inventory & Supply Chain Analyst",
+    "sender_mobile": "346-385-9107",
+    "cc_name": "Hamza Kamran",
+    "cc_email": "hamza@gfhtelecom.com",
+}
+_DEFAULT_DISTRICTS = {
+    "Arizona":       {"name": "Mohammad Farhan Mohiuddin", "email": "[REDACTED]"},
+    "Houston":       {"name": "Muhammad Hamza",            "email": "[REDACTED]"},
+    "Louisiana":     {"name": "Asif Khan",                 "email": "[REDACTED]"},
+    "Colorado West": {"name": "Raiyan Baig",               "email": "[REDACTED]"},
+    "Colorado East": {"name": "Shehriyar Ali",             "email": "[REDACTED]"},
+    "Tennessee":     {"name": "Ahmed Siraj",                "email": "[REDACTED]"},
+}
 
 
 def _contacts_config_path() -> str:
@@ -145,33 +161,37 @@ def _contacts_config_path() -> str:
 
 def load_contacts_config() -> dict:
     """Load sender/CC/per-district contacts from the JSON config file.
-    All fields default to empty strings if the config file doesn't exist yet —
-    nothing is pre-filled with a real address."""
+    On first run (no config file yet) this is seeded with the existing
+    defaults so nothing looks stripped. After that, the JSON file is the
+    single source of truth — districts can be freely added, renamed, or
+    removed from the Settings dialog and will persist here, not just the
+    original fixed six."""
     path = _contacts_config_path()
+    if not os.path.exists(path):
+        cfg = dict(_DEFAULT_SENDER)
+        cfg["districts"] = {d: dict(v) for d, v in _DEFAULT_DISTRICTS.items()}
+        save_contacts_config(cfg)
+        return cfg
+
     cfg = {
         "sender_name": "", "sender_email": "", "sender_title": "", "sender_mobile": "",
-        "cc_name": "", "cc_email": "",
-        "districts": {d: {"name": "", "email": ""} for d in DISTRICTS},
+        "cc_name": "", "cc_email": "", "districts": {},
     }
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-            cfg["sender_name"] = saved.get("sender_name", "")
-            cfg["sender_email"] = saved.get("sender_email", "")
-            cfg["sender_title"] = saved.get("sender_title", "")
-            cfg["sender_mobile"] = saved.get("sender_mobile", "")
-            cfg["cc_name"] = saved.get("cc_name", "")
-            cfg["cc_email"] = saved.get("cc_email", "")
-            saved_districts = saved.get("districts", {})
-            for d in DISTRICTS:
-                entry = saved_districts.get(d, {})
-                cfg["districts"][d] = {
-                    "name": entry.get("name", ""),
-                    "email": entry.get("email", ""),
-                }
-        except Exception:
-            pass
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        for k in ("sender_name", "sender_email", "sender_title", "sender_mobile", "cc_name", "cc_email"):
+            cfg[k] = saved.get(k, "")
+        # Districts are whatever is actually saved — fully dynamic, not
+        # restricted to any fixed list, so newly-added districts persist.
+        saved_districts = saved.get("districts", {})
+        for d, entry in saved_districts.items():
+            cfg["districts"][d] = {
+                "name": entry.get("name", ""),
+                "email": entry.get("email", ""),
+            }
+    except Exception:
+        pass
     return cfg
 
 
@@ -938,19 +958,21 @@ def _set_window_icon(root):
 
 class SettingsDialog(tk.Toplevel):
     """Lets the user enter the sender identity, CC, and a name+email per
-    district. Nothing is hardcoded — everything here is loaded from and
-    saved back to CONTACTS_CONFIG_FILE (gfh_aging_contacts.json)."""
+    district. Districts are fully dynamic here — add, rename, or remove
+    rows freely; whatever's in the dialog on Save becomes the new district
+    list, persisted to CONTACTS_CONFIG_FILE (gfh_aging_contacts.json)."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Settings — Sender & District Contacts")
         self.configure(bg=LIGHT)
-        self.resizable(False, False)
+        self.resizable(False, True)
         self.transient(parent)
         self.grab_set()
 
         cfg = load_contacts_config()
         self._vars = {}
+        self._dist_rows = []  # list of (row_frame, district_name_var, name_var, email_var)
 
         pad = {"padx": 8, "pady": 4}
 
@@ -974,27 +996,24 @@ class SettingsDialog(tk.Toplevel):
         add_row(sender_frame, 5, "CC email:", "cc_email")
         sender_frame.columnconfigure(1, weight=1)
 
-        dist_frame = tk.LabelFrame(self, text="District contacts (name + email per district)",
+        dist_outer = tk.LabelFrame(self, text="District contacts (add/remove districts freely)",
                                     bg=LIGHT, fg=NAVY, font=("Calibri", 10, "bold"))
-        dist_frame.pack(fill="x", padx=12, pady=(6, 6))
+        dist_outer.pack(fill="both", expand=True, padx=12, pady=(6, 6))
 
-        self._dist_vars = {}
-        for i, d in enumerate(DISTRICTS):
-            tk.Label(dist_frame, text=d + ":", bg=LIGHT, fg=NAVY,
-                     font=("Calibri", 9, "bold")).grid(row=i, column=0, sticky="w", **pad)
-            nv = tk.StringVar(value=cfg["districts"].get(d, {}).get("name", ""))
-            ev = tk.StringVar(value=cfg["districts"].get(d, {}).get("email", ""))
-            tk.Entry(dist_frame, textvariable=nv, width=20, font=("Calibri", 9)
-                     ).grid(row=i, column=1, sticky="ew", **pad)
-            tk.Entry(dist_frame, textvariable=ev, width=28, font=("Calibri", 9)
-                     ).grid(row=i, column=2, sticky="ew", **pad)
-            self._dist_vars[d] = (nv, ev)
-        tk.Label(dist_frame, text="Name", bg=LIGHT, fg="#666",
-                 font=("Calibri", 8)).grid(row=len(DISTRICTS), column=1)
-        tk.Label(dist_frame, text="Email", bg=LIGHT, fg="#666",
-                 font=("Calibri", 8)).grid(row=len(DISTRICTS), column=2)
-        dist_frame.columnconfigure(1, weight=1)
-        dist_frame.columnconfigure(2, weight=1)
+        hdr = tk.Frame(dist_outer, bg=LIGHT); hdr.pack(fill="x", padx=8, pady=(6, 0))
+        tk.Label(hdr, text="District", bg=LIGHT, fg="#666", font=("Calibri", 8), width=16, anchor="w").pack(side="left")
+        tk.Label(hdr, text="Contact name", bg=LIGHT, fg="#666", font=("Calibri", 8), width=20, anchor="w").pack(side="left")
+        tk.Label(hdr, text="Email", bg=LIGHT, fg="#666", font=("Calibri", 8), width=28, anchor="w").pack(side="left")
+
+        self._dist_container = tk.Frame(dist_outer, bg=LIGHT)
+        self._dist_container.pack(fill="both", expand=True, padx=8, pady=(2, 6))
+
+        for d, entry in cfg["districts"].items():
+            self._add_district_row(d, entry.get("name", ""), entry.get("email", ""))
+
+        ttk.Button(dist_outer, text="+ Add District", style="Browse.TButton",
+                   command=lambda: self._add_district_row("", "", "")
+                   ).pack(anchor="w", padx=8, pady=(0, 8))
 
         btn_row = tk.Frame(self, bg=LIGHT)
         btn_row.pack(fill="x", padx=12, pady=(6, 12))
@@ -1003,12 +1022,38 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(btn_row, text="Cancel", style="Browse.TButton",
                    command=self.destroy).pack(side="right")
 
+    def _add_district_row(self, district_name, contact_name, contact_email):
+        row = tk.Frame(self._dist_container, bg=LIGHT)
+        row.pack(fill="x", pady=2)
+
+        dv = tk.StringVar(value=district_name)
+        nv = tk.StringVar(value=contact_name)
+        ev = tk.StringVar(value=contact_email)
+
+        tk.Entry(row, textvariable=dv, width=16, font=("Calibri", 9)).pack(side="left", padx=(0, 4))
+        tk.Entry(row, textvariable=nv, width=20, font=("Calibri", 9)).pack(side="left", padx=(0, 4))
+        tk.Entry(row, textvariable=ev, width=28, font=("Calibri", 9)).pack(side="left", padx=(0, 4))
+
+        entry_tuple = (row, dv, nv, ev)
+
+        def remove():
+            row.destroy()
+            self._dist_rows.remove(entry_tuple)
+
+        tk.Button(row, text="✕", command=remove, bg=LIGHT, fg="#c0392b",
+                  font=("Calibri", 9, "bold"), bd=0, cursor="hand2").pack(side="left")
+
+        self._dist_rows.append(entry_tuple)
+
     def _save(self):
         cfg = {k: v.get().strip() for k, v in self._vars.items()}
-        cfg["districts"] = {
-            d: {"name": nv.get().strip(), "email": ev.get().strip()}
-            for d, (nv, ev) in self._dist_vars.items()
-        }
+        districts = {}
+        for _row, dv, nv, ev in self._dist_rows:
+            d = dv.get().strip()
+            if not d:
+                continue  # skip rows where the district name was left blank
+            districts[d] = {"name": nv.get().strip(), "email": ev.get().strip()}
+        cfg["districts"] = districts
         save_contacts_config(cfg)
         messagebox.showinfo("Saved", "Contacts saved to gfh_aging_contacts.json", parent=self)
         self.destroy()
