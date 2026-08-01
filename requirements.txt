@@ -1,0 +1,7 @@
+pandas
+openpyxl
+pillow
+pywin32
+gspread
+gspread-formatting
+tkinterdnd2

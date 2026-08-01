@@ -1,0 +1,39 @@
+name: Build GFH_Inventory_Aging_Processor EXE
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build GFH_Inventory_Aging_Processor.exe
+        run: >
+          pyinstaller --onefile --windowed --clean
+          --name "GFH_Inventory_Aging_Processor"
+          --icon "GFH_Telecom_TBLogo.ico"
+          --hidden-import win32gui --hidden-import win32con
+          --hidden-import win32api --hidden-import win32process
+          "GFH_Inventory_Aging_Processor.pyw"
+      - name: Upload exe directly to release (no Actions storage used)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          files: dist/GFH_Inventory_Aging_Processor.exe
