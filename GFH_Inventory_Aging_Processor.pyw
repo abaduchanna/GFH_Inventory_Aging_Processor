@@ -142,8 +142,8 @@ _DEFAULT_SENDER = {
     "sender_email": "[REDACTED]",
     "sender_title": "Senior Inventory & Supply Chain Analyst",
     "sender_mobile": "346-385-9107",
-    "cc_name": "Hamza Kamran",
-    "cc_email": "hamza@gfhtelecom.com",
+    "cc_name": "",
+    "cc_email": "",
 }
 _DEFAULT_DISTRICTS = {
     "Arizona":       {"name": "Mohammad Farhan Mohiuddin", "email": "[REDACTED]"},
