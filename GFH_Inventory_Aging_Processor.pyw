@@ -156,7 +156,7 @@ _DEFAULT_DISTRICTS = {
 
 
 def _contacts_config_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), CONTACTS_CONFIG_FILE)
+    return os.path.join(get_app_dir(), CONTACTS_CONFIG_FILE)
 
 
 def load_contacts_config() -> dict:
@@ -244,6 +244,20 @@ HEADER_LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAlgAAADRCAYAAAAQRszlAAEAAElEQVR42uz9e
 
 
 def get_script_dir() -> str:
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_app_dir() -> str:
+    """Directory where user-facing files live (credentials.json, authorized_user.json,
+    gfh_aging_contacts.json).
+
+    When frozen into a PyInstaller onefile EXE, ``__file__`` points at the temporary
+    ``_MEIPASS`` extraction folder, which is wiped on each run and is never where the
+    user placed their files. In that case resolve relative to the EXE itself so files
+    sitting next to the app are actually found.
+    """
+    if getattr(sys, "frozen", False) and getattr(sys, "executable", None):
+        return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -518,8 +532,8 @@ def send_via_outlook(to, subject, html_body, attachment_path, log, sender_email=
 # ==========================================================
 
 def authenticate_google(log):
-    creds_path = os.path.join(get_script_dir(), CREDENTIALS_FILE)
-    auth_user_path = os.path.join(get_script_dir(), AUTHORIZED_USER_FILE)
+    creds_path = os.path.join(get_app_dir(), CREDENTIALS_FILE)
+    auth_user_path = os.path.join(get_app_dir(), AUTHORIZED_USER_FILE)
 
     if not os.path.exists(creds_path):
         raise PipelineError(
