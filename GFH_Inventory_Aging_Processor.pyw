@@ -1205,9 +1205,6 @@ class App:
                                         style="Browse.TButton", command=self._open_settings)
         self.settings_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
-    def _open_settings(self):
-        SettingsDialog(self.root)
-
         # Progress
         self.progress = ttk.Progressbar(body, mode="indeterminate",
                                       style="Accent.Horizontal.TProgressbar")
@@ -1220,6 +1217,9 @@ class App:
             body, height=11, font=("Consolas", 8),
             bg="#10182e", fg="#a8d8ff", relief="flat", state="disabled", wrap="word")
         self.log_box.pack(fill="both", expand=True)
+
+    def _open_settings(self):
+        SettingsDialog(self.root)
 
     def _copyright_bar(self):
         bar = tk.Frame(self.root, bg=NAVY, height=26)
