@@ -1,4 +1,7 @@
-"""
+import datetime as _doc_dt
+_DOC_YEAR = _doc_dt.date.today().year
+
+f"""
 GFH Inventory Aging Processor
 ==============================
 Pick an Inventory Aging Excel export, then:
@@ -20,7 +23,7 @@ Pick an Inventory Aging Excel export, then:
 Install once:
     pip install pandas openpyxl gspread gspread-formatting pywin32 tkinterdnd2 pillow
 
-Developed by Abad Umair Channa  |  Copyright © 2026  |  All rights reserved.
+Developed by Abad Umair Channa  |  Copyright © {_DOC_YEAR}  |  All rights reserved.
 """
 
 import os, sys, re, io, json, base64, tempfile, threading, traceback, queue, argparse, webbrowser
@@ -29,7 +32,7 @@ from datetime import datetime
 
 try:
     import tkinter as tk
-from theme_manager import ThemeManager, apply_theme_to_window, get_copyright_year
+    from theme_manager import ThemeManager, apply_theme_to_window, get_copyright_year, create_theme_toggle_button
     from tkinter import ttk, filedialog, messagebox, scrolledtext
 except ImportError:
     print("tkinter not available."); sys.exit(1)
@@ -125,7 +128,7 @@ COLOR_TEXT  = "#1c1c1c"
 COLOR_LOG_BG = "#0d0d1f"
 COLOR_LOG_TEXT = "#d7e3f0"
 
-COPYRIGHT_TEXT = "Developed by Abad Umair Channa  |  Copyright © 2026  |  All rights reserved."
+COPYRIGHT_TEXT = f"Developed by Abad Umair Channa  |  Copyright © {get_copyright_year()}  |  All rights reserved."
 
 # ── Local Excel + Email config ──
 MIN_AGE       = 20
@@ -1091,7 +1094,10 @@ class App:
         root.configure(bg=LIGHT)
         _set_window_icon(root)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
-        self._styles(); self._header(); self._body(); self._copyright_bar(); self._poll()
+        self.theme_manager = ThemeManager("GFH Inventory Aging Processor")
+        self._styles(); self._header(); self._body(); self._copyright_bar()
+        apply_theme_to_window(self.root, self.theme_manager)
+        self._poll()
 
     def _apply_dynamic_geometry(self) -> None:
         """Size the window to 90% of the screen and center it.
@@ -1135,6 +1141,7 @@ class App:
     def _header(self):
         hdr = tk.Frame(self.root, bg=NAVY, height=108)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
+        hdr._tag = "header"
         self._wordmark_img = None
         if _HAS_PIL:
             png_path = os.path.join(get_script_dir(), LOGO_PNG_NAME)
@@ -1151,15 +1158,23 @@ class App:
             except Exception:
                 pass
         lf = tk.Frame(hdr, bg=NAVY); lf.place(relx=0, rely=0.5, anchor="w", x=24)
+        lf._tag = "header"
         if self._wordmark_img:
             tk.Label(lf, image=self._wordmark_img, bg=NAVY).pack()
         else:
             tk.Label(lf, text="GFH TELECOM", font=("Calibri", 16, "bold"), fg=RED, bg=NAVY).pack()
         tf = tk.Frame(hdr, bg=NAVY); tf.place(relx=0.58, rely=0.5, anchor="center")
+        tf._tag = "header"
         tk.Label(tf, text="INVENTORY AGING PROCESSOR",
                  font=("Calibri", 18, "bold"), fg=WHITE, bg=NAVY).pack()
         tk.Label(tf, text="Process & Email  |  Upload to Google Sheets  |  Executive Dashboard",
                  font=("Calibri", 9), fg=WHITE, bg=NAVY).pack()
+
+        theme_btn = create_theme_toggle_button(hdr, self.theme_manager)
+        theme_btn.place(relx=0.98, rely=0.5, anchor="e")
+
+    def _apply_theme(self, colors=None):
+        apply_theme_to_window(self.root, self.theme_manager)
 
     def _body(self):
         body = tk.Frame(self.root, bg=LIGHT)

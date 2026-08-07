@@ -1,10 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller spec file for Gfh Inventory Aging Processor
-Developed by Abad Umair Channa © 2026
+import datetime as _dt
+_year = _dt.date.today().year
 
+SPEC_DOC = f"""PyInstaller spec
+Developed by Abad Umair Channa © {_year}
 Build command: pyinstaller GFH_Inventory_Aging_Processor.spec
 """
+
 
 block_cipher = None
 
