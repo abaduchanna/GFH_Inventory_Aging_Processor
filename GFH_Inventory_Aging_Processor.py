@@ -1163,7 +1163,7 @@ class App:
             tk.Label(lf, image=self._wordmark_img, bg=NAVY).pack()
         else:
             tk.Label(lf, text="GFH TELECOM", font=("Calibri", 16, "bold"), fg=RED, bg=NAVY).pack()
-        tf = tk.Frame(hdr, bg=NAVY); tf.place(relx=0.58, rely=0.5, anchor="center")
+        tf = tk.Frame(hdr, bg=NAVY); tf.place(relx=0.5, rely=0.5, anchor="center")
         tf._tag = "header"
         tk.Label(tf, text="INVENTORY AGING PROCESSOR",
                  font=("Calibri", 18, "bold"), fg=WHITE, bg=NAVY).pack()
