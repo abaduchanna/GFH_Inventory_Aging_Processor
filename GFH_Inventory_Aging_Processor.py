@@ -1159,6 +1159,9 @@ class App:
         hdr = tk.Frame(self.root, bg=NAVY, height=108)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
         hdr._tag = "header"
+
+        hdr.bind("<Enter>", lambda e, w=hdr: w.configure(bg=NAVY))
+        hdr.bind("<Leave>", lambda e, w=hdr: w.configure(bg=NAVY))
         self._wordmark_img = None
         if _HAS_PIL:
             png_path = os.path.join(get_script_dir(), LOGO_PNG_NAME)
