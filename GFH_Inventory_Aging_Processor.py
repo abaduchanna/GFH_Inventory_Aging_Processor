@@ -956,6 +956,20 @@ def _extract_embedded_icon(b64, filename):
 def _set_window_icon(root):
     """Set taskbar + titlebar icon from embedded base64 ICO."""
     import base64, tempfile, atexit, os, sys
+
+    # 1. Try sys._MEIPASS (PyInstaller onefile extraction dir)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        ico_path = os.path.join(meipass, "gfh_icon_white.ico")
+        if os.path.exists(ico_path):
+            try:
+                root.iconbitmap(default=False, bitmap=ico_path)
+                root.iconbitmap(ico_path)
+                return
+            except Exception:
+                pass
+
+    # 2. Try next to the exe/script
     if getattr(sys, "frozen", False):
         base_dir = os.path.dirname(sys.executable)
     else:
@@ -968,8 +982,12 @@ def _set_window_icon(root):
             return
         except Exception:
             pass
+
+    # 3. Decode EMBEDDED_ICON_B64 to %TEMP% (no spaces, always writable)
     try:
         data = base64.b64decode(EMBEDDED_ICON_B64.strip())
+        tmp_dir = os.environ.get("TEMP", tempfile.gettempdir())
+        ico_path = os.path.join(tmp_dir, "gfh_app_icon.ico")
         with open(ico_path, "wb") as f:
             f.write(data)
         root.iconbitmap(default=False, bitmap=ico_path)
@@ -977,17 +995,7 @@ def _set_window_icon(root):
         return
     except Exception:
         pass
-    try:
-        data = base64.b64decode(EMBEDDED_ICON_B64.strip())
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ico")
-        tmp.write(data)
-        tmp.close()
-        atexit.register(lambda p=tmp.name: os.path.exists(p) and os.unlink(p))
-        root.iconbitmap(default=False, bitmap=tmp.name)
-        root.iconbitmap(tmp.name)
-        return
-    except Exception:
-        pass
+
 
 class SettingsDialog(tk.Toplevel):
     """Lets the user enter the sender identity, CC, and a name+email per
