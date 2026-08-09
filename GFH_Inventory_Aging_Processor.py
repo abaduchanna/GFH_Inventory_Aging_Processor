@@ -114,7 +114,7 @@ if _optional_missing:
 # CONFIGURATION
 # ==========================================================
 APP_TITLE = "GFH Inventory Aging Processor"
-ICON_ICO_NAME = "GFH_Telecom_TBLogo.ico"      # used for taskbar + titlebar (Windows .ico)
+ICON_ICO_NAME = "gfh_icon_white.ico"      # used for taskbar + titlebar (Windows .ico)
 LOGO_PNG_NAME = "GFH_Telecom_Logo.png"        # used in the header (resized at runtime via PIL)
 
 NAVY       = "#090d26"
