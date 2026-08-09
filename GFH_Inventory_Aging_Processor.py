@@ -955,8 +955,28 @@ def _extract_embedded_icon(b64, filename):
 
 def _set_window_icon(root):
     """Set taskbar + titlebar icon from embedded base64 ICO."""
-    import base64, tempfile, atexit, os
-    # Decode the embedded ICO to a temp file that persists until exit
+    import base64, tempfile, atexit, os, sys
+    if getattr(sys, "frozen", False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    ico_path = os.path.join(base_dir, "gfh_icon_white.ico")
+    if os.path.exists(ico_path):
+        try:
+            root.iconbitmap(default=False, bitmap=ico_path)
+            root.iconbitmap(ico_path)
+            return
+        except Exception:
+            pass
+    try:
+        data = base64.b64decode(EMBEDDED_ICON_B64.strip())
+        with open(ico_path, "wb") as f:
+            f.write(data)
+        root.iconbitmap(default=False, bitmap=ico_path)
+        root.iconbitmap(ico_path)
+        return
+    except Exception:
+        pass
     try:
         data = base64.b64decode(EMBEDDED_ICON_B64.strip())
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ico")
@@ -968,19 +988,6 @@ def _set_window_icon(root):
         return
     except Exception:
         pass
-    # Fallback: try ICON_ICO_B64
-    try:
-        data = base64.b64decode(ICON_ICO_B64.strip())
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ico")
-        tmp.write(data)
-        tmp.close()
-        atexit.register(lambda p=tmp.name: os.path.exists(p) and os.unlink(p))
-        root.iconbitmap(default=False, bitmap=tmp.name)
-        root.iconbitmap(tmp.name)
-        return
-    except Exception:
-        pass
-    # No iconphoto fallback — iconbitmap is the only way to set the icon.
 
 class SettingsDialog(tk.Toplevel):
     """Lets the user enter the sender identity, CC, and a name+email per
