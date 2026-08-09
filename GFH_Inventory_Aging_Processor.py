@@ -954,52 +954,40 @@ def _extract_embedded_icon(b64, filename):
         return None
 
 def _set_window_icon(root):
-    """Set taskbar + titlebar icon. Prefers GFH_Telecom_TBLogo.ico next to this
-    script/exe (consistent with the other GFH tools); falls back to the
-    embedded base64 icon if the file isn't present (e.g. standalone .exe)."""
-    # Use EMBEDDED_ICON_B64 first (self-contained, works in frozen .exe)
+    """Set taskbar + titlebar icon from embedded base64 ICO."""
+    import base64, tempfile, atexit, os
+    # Decode the embedded ICO to a temp file that persists until exit
     try:
-        _embedded_ico = _extract_embedded_icon(EMBEDDED_ICON_B64, "app_icon.ico")
-        if _embedded_ico:
-            root.iconbitmap(default=False, bitmap=_embedded_ico)
-            root.iconbitmap(_embedded_ico)
-            return
-    except Exception:
-        pass
-    ico_path = os.path.join(get_script_dir(), ICON_ICO_NAME)
-    try:
-        if os.path.exists(ico_path):
-            root.iconbitmap(default=False, bitmap=ico_path)
-            root.iconbitmap(ico_path)
-            return
-    except Exception:
-        pass
-    try:
-        import atexit
-        data = base64.b64decode(ICON_ICO_B64.strip())
+        data = base64.b64decode(EMBEDDED_ICON_B64.strip())
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ico")
-        tmp.write(data); tmp.close()
+        tmp.write(data)
+        tmp.close()
         atexit.register(lambda p=tmp.name: os.path.exists(p) and os.unlink(p))
         root.iconbitmap(default=False, bitmap=tmp.name)
         root.iconbitmap(tmp.name)
         return
     except Exception:
         pass
-    if _HAS_PIL:
-        try:
-            data = base64.b64decode(HEADER_LOGO_B64.replace("\n", "").replace(" ", "").strip())
-            img = _PI.open(io.BytesIO(data))
-            root.iconphoto(True, _PIT.PhotoImage(img))
-        except Exception:
-            pass
-    else:
-        try:
-            png_path = os.path.join(get_script_dir(), "gfh_icon.png")
-            if os.path.exists(png_path):
-                root.iconphoto(True, tk.PhotoImage(file=png_path))
-        except Exception:
-            pass
-
+    # Fallback: try ICON_ICO_B64
+    try:
+        data = base64.b64decode(ICON_ICO_B64.strip())
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ico")
+        tmp.write(data)
+        tmp.close()
+        atexit.register(lambda p=tmp.name: os.path.exists(p) and os.unlink(p))
+        root.iconbitmap(default=False, bitmap=tmp.name)
+        root.iconbitmap(tmp.name)
+        return
+    except Exception:
+        pass
+    # Last resort: brand PNG via iconphoto
+    try:
+        png_path = _resource_path(LOGO_PNG_NAME)
+        if os.path.exists(png_path):
+            from PIL import Image as _PI, ImageTk as _PIT
+            root.iconphoto(True, _PIT.PhotoImage(_PI.open(png_path)))
+    except Exception:
+        pass
 
 class SettingsDialog(tk.Toplevel):
     """Lets the user enter the sender identity, CC, and a name+email per
@@ -1238,6 +1226,8 @@ class App:
 
         theme_btn = create_theme_toggle_button(hdr, self.theme_manager, on_toggle=self._apply_theme)
         theme_btn.place(relx=0.98, rely=0.5, anchor="e")
+
+        self._lock_header_colors(hdr, NAVY)
 
         self._lock_header_colors(hdr, NAVY)
 
