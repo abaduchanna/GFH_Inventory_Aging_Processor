@@ -31,8 +31,7 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    import tkinter
-DEFAULT_FONT = ("Segoe UI", 10) as tk
+    import tkinter as tk
     from theme_manager import ThemeManager, apply_theme_to_window, get_copyright_year, create_theme_toggle_button
     from tkinter import ttk, filedialog, messagebox, scrolledtext
 except ImportError:
