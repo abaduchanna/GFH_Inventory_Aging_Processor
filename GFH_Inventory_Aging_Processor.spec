@@ -11,11 +11,12 @@ block_cipher = None
 
 a = Analysis(
     ['GFH_Inventory_Aging_Processor.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
     datas=[
-        ('gfh_icon_white.ico', '.'),
         ('GFH_Telecom_Logo.png', '.'),
+        ('gfh_icon_white.ico', '.'),
+        ('theme_manager.py', '.'),
     ],
     hiddenimports=[
         'tkinter',
