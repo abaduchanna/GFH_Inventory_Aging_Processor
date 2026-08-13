@@ -23,7 +23,7 @@ Pick an Inventory Aging Excel export, then:
 Install once:
     pip install pandas openpyxl gspread gspread-formatting pywin32 tkinterdnd2 pillow
 
-Developed by Abad Umair Channa | Copyright © 2026 | All rights reserved.
+Developed by Abad Umair Channa | Copyright © {date.today().year} | All rights reserved.
 """
 
 import os, sys, re, io, json, base64, tempfile, threading, traceback, queue, argparse, webbrowser
@@ -114,7 +114,7 @@ if _optional_missing:
 # CONFIGURATION
 # ==========================================================
 APP_TITLE = "GFH Inventory Aging Processor"
-ICON_ICO_NAME = "gfh_icon_white.ico"      # used for taskbar + titlebar (Windows .ico)
+ICON_ICO_NAME = "gfh_icon.ico"      # used for taskbar + titlebar (Windows .ico)
 LOGO_PNG_NAME = "GFH_Telecom_Logo.png"        # used in the header (resized at runtime via PIL)
 
 NAVY       = "#090d26"
@@ -131,7 +131,7 @@ COLOR_TEXT  = "#1c1c1c"
 COLOR_LOG_BG = "#0d0d1f"
 COLOR_LOG_TEXT = "#d7e3f0"
 
-COPYRIGHT_TEXT = f"Developed by Abad Umair Channa | Copyright © 2026 | All rights reserved."
+COPYRIGHT_TEXT = f"Developed by Abad Umair Channa | Copyright © {date.today().year} | All rights reserved."
 
 # ── Local Excel + Email config ──
 MIN_AGE       = 20
@@ -960,7 +960,7 @@ def _set_window_icon(root):
     # 1. Try sys._MEIPASS (PyInstaller onefile extraction dir)
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        ico_path = os.path.join(meipass, "gfh_icon_white.ico")
+        ico_path = os.path.join(meipass, "gfh_icon.ico")
         if os.path.exists(ico_path):
             try:
                 root.iconbitmap(default=False, bitmap=ico_path)
@@ -974,7 +974,7 @@ def _set_window_icon(root):
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-    ico_path = os.path.join(base_dir, "gfh_icon_white.ico")
+    ico_path = os.path.join(base_dir, "gfh_icon.ico")
     if os.path.exists(ico_path):
         try:
             root.iconbitmap(default=False, bitmap=ico_path)
