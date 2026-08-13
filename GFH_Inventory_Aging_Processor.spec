@@ -7,7 +7,6 @@ Developed by Abad Umair Channa \u00a9 {_year}
 Build command: pyinstaller GFH_Inventory_Aging_Processor.spec
 """
 
-
 block_cipher = None
 
 a = Analysis(
@@ -20,28 +19,6 @@ a = Analysis(
     ],
     hiddenimports=[
         'tkinter',
-        'selenium',
-        'selenium.webdriver',
-        'selenium.webdriver.chrome',
-        'selenium.webdriver.chrome.service',
-        'selenium.webdriver.chrome.options',
-        'selenium.webdriver.edge',
-        'selenium.webdriver.edge.options',
-        'selenium.webdriver.edge.service',
-        'selenium.webdriver.edge.webdriver',
-        'selenium.webdriver.common',
-        'selenium.webdriver.common.by',
-        'selenium.webdriver.common.keys',
-        'selenium.webdriver.common.service',
-        'selenium.webdriver.support',
-        'selenium.webdriver.support.ui',
-        'selenium.webdriver.support.expected_conditions',
-        'selenium.webdriver.remote',
-        'selenium.webdriver.remote.webdriver',
-        'selenium.webdriver.remote.command',
-        'selenium.webdriver.remote.remote_connection',
-        'selenium.common',
-        'selenium.common.exceptions',
         'pyautogui',
         'openpyxl',
         'pyperclip',
