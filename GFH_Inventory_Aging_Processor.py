@@ -37,6 +37,9 @@ try:
 except ImportError:
     print("tkinter not available."); sys.exit(1)
 
+from header_manager import FixedHeaderManager
+from logo_handler import LogoHandler
+
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
     HAS_DND = True
@@ -1198,6 +1201,7 @@ class App:
         except Exception:
             pass
     def _header(self):
+        self.header_mgr = FixedHeaderManager(self.root, title="GFH Inventory Aging Processor")
         hdr = tk.Frame(self.root, bg=NAVY, height=108)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
         hdr._tag = "header"
