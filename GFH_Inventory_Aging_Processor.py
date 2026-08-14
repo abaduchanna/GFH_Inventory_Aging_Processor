@@ -1129,7 +1129,7 @@ class App:
 
         _set_window_icon(root)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
-        self.theme_manager = ThemeManager("GFH Inventory Aging Processor")
+        self.theme_manager = ThemeManager("GFH Inventory Aging Processor", app_name="gfh-inventory-aging-processor")
         self._styles(); self._header(); self._body(); self._copyright_bar()
         apply_theme_to_window(self.root, self.theme_manager)
         self._poll()
