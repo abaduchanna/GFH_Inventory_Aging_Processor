@@ -32,7 +32,7 @@ from datetime import datetime
 
 try:
     import tkinter as tk
-    from theme_manager import ThemeManager, apply_theme_to_window, get_copyright_year, create_theme_toggle_button
+    from theme_manager import ThemeManager, apply_theme_to_window, get_copyright_year
     from tkinter import ttk, filedialog, messagebox, scrolledtext
 except ImportError:
     print("tkinter not available."); sys.exit(1)
