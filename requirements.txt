@@ -1,7 +1,9 @@
-# Standardized requirements for GFH/VidaPay applications
+# Aging processor: Excel + Google Sheets + drag-drop
 # Developed by Abad Umair Channa
 
-pillow>=10.0.0
 openpyxl>=3.1.0
-pandas>=2.0.0
-requests>=2.31.0
+Pillow>=9.0.0
+pywin32>=306
+gspread>=5.0.0
+gspread-formatting>=1.0.0
+tkinterdnd2>=0.3.0
