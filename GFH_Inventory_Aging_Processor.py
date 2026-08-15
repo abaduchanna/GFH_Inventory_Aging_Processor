@@ -1250,7 +1250,7 @@ class App:
         tk.Label(tf, text="Process & Email  |  Upload to Google Sheets  |  Executive Dashboard",
                  font=("Calibri", 9), fg=WHITE, bg=NAVY).pack()
 
-        theme_btn = self.theme_manager.create_theme_toggle_button(hdr, on_toggle=self._apply_theme)
+        theme_btn = self.theme_manager.create_theme_toggle_button(hdr, callback=self._apply_theme)
         theme_btn.place(relx=0.98, rely=0.5, anchor="e")
 
         self._lock_header_colors(hdr, NAVY)
