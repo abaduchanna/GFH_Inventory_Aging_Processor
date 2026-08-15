@@ -1138,7 +1138,7 @@ class App:
         root.protocol("WM_DELETE_WINDOW", root.destroy)
         self.theme_manager = ThemeManager("GFH Inventory Aging Processor", app_name="gfh-inventory-aging-processor")
         self._styles(); self._header(); self._body(); self._copyright_bar()
-        # apply_theme_to_window removed — _walk handles all styling
+        apply_theme_to_window(self.root, self.theme_manager)
         self._poll()
 
     def _apply_dynamic_geometry(self) -> None:
@@ -1228,7 +1228,7 @@ class App:
         """Apply theme colors to all widgets."""
         if colors is None:
             colors = self.theme_manager.get_colors()
-        # apply_theme_to_window removed — _walk handles all styling
+        apply_theme_to_window(self.root, self.theme_manager)
         try:
             self.root.configure(bg=colors.get("bg", "#f6f7fb"))
         except Exception:
