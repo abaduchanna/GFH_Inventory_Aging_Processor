@@ -1,4 +1,5 @@
 import datetime as _doc_dt
+from datetime import date
 _DOC_YEAR = _doc_dt.date.today().year
 
 f"""
