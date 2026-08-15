@@ -1202,6 +1202,7 @@ class App:
             pass
     def _header(self):
         self.header_mgr = FixedHeaderManager(self.root, title="GFH Inventory Aging Processor")
+        self.header_mgr.add_theme_toggle(self.theme_manager, callback=self._apply_theme)
         hdr = tk.Frame(self.root, bg=NAVY, height=108)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
         hdr._tag = "header"
