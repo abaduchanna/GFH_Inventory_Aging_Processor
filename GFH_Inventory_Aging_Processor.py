@@ -1222,46 +1222,7 @@ class App:
         except Exception:
             pass
         self.header_mgr.add_theme_toggle(self.theme_manager, callback=self._apply_theme)
-        hdr = tk.Frame(self.root, bg=NAVY, height=108)
-        hdr.pack(fill="x"); hdr.pack_propagate(False)
-        hdr._tag = "header"
 
-        hdr.bind("<Enter>", lambda e, w=hdr: w.configure(bg=NAVY))
-        hdr.bind("<Leave>", lambda e, w=hdr: w.configure(bg=NAVY))
-        self._wordmark_img = None
-        if _HAS_PIL:
-            png_path = os.path.join(get_script_dir(), LOGO_PNG_NAME)
-            try:
-                if os.path.exists(png_path):
-                    img = _PI.open(png_path).convert("RGBA")
-                else:
-                    data = base64.b64decode(HEADER_LOGO_B64.replace("\n", "").replace(" ", "").strip())
-                    img = _PI.open(io.BytesIO(data)).convert("RGBA")
-                bg2 = _PI.new("RGBA", img.size, (9, 13, 38, 255))
-                bg2.paste(img, mask=img.split()[3])
-                img = bg2.convert("RGB"); img.thumbnail((260, 82), _PI.Resampling.LANCZOS)
-                self._wordmark_img = _PIT.PhotoImage(img)
-            except Exception:
-                pass
-        lf = tk.Frame(hdr, bg=NAVY); lf.place(relx=0, rely=0.5, anchor="w", x=24)
-        lf._tag = "header"
-        if self._wordmark_img:
-            tk.Label(lf, image=self._wordmark_img, bg=NAVY).pack()
-        else:
-            tk.Label(lf, text="GFH TELECOM", font=("Calibri", 16, "bold"), fg=RED, bg=NAVY).pack()
-        tf = tk.Frame(hdr, bg=NAVY); tf.place(relx=0.5, rely=0.5, anchor="center")
-        tf._tag = "header"
-        tk.Label(tf, text="INVENTORY AGING PROCESSOR",
-                 font=("Calibri", 18, "bold"), fg=WHITE, bg=NAVY).pack()
-        tk.Label(tf, text="Process & Email  |  Upload to Google Sheets  |  Executive Dashboard",
-                 font=("Calibri", 9), fg=WHITE, bg=NAVY).pack()
-
-        theme_btn = self.theme_manager.create_theme_toggle_button(hdr, callback=self._apply_theme)
-        theme_btn.place(relx=0.98, rely=0.5, anchor="e")
-
-        self._lock_header_colors(hdr, NAVY)
-
-        self._lock_header_colors(hdr, NAVY)
 
     def _apply_theme(self, colors=None):
         """Apply theme colors to all widgets."""
