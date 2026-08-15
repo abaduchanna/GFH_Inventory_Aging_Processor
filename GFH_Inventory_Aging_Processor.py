@@ -83,6 +83,12 @@ except ImportError:
 # Import openpyxl Border/Side with aliases to avoid conflict with gspread_formatting's Border
 from openpyxl.styles import Font, PatternFill, Alignment, Border as XlBorder, Side as XlSide
 from openpyxl.utils import get_column_letter
+import queue
+import threading
+import re
+import base64
+import tempfile
+import json
 
 if not _HAS_GSPREAD or not _HAS_GSPREAD_FMT:
     _MISSING.append("gspread + gspread-formatting")
