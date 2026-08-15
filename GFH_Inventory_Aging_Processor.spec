@@ -23,7 +23,6 @@ a = Analysis(
     hiddenimports=[
         'tkinter',
         '_tkinter',
-        'tkinter._fix',
         'pyautogui',
         'openpyxl',
         'pyperclip',
@@ -33,8 +32,6 @@ a = Analysis(
         'PIL',
         'pandas',
         'gspread',
-        'oauth2client',
-        'pywin32',
     ],
     hookspath=[],
     hooksconfig={},
