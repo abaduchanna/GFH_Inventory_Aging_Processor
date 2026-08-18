@@ -973,8 +973,8 @@ def _set_window_icon(root):
         ico_path = os.path.join(meipass, "gfh_icon.ico")
         if os.path.exists(ico_path):
             try:
-                root.iconbitmap(default=False, bitmap=ico_path)
-                root.iconbitmap(ico_path)
+                root.iconbitmap(default=ico_path)
+                root.after(200, lambda p=ico_path: root.iconbitmap(default=p))
                 return
             except Exception:
                 pass
@@ -987,8 +987,8 @@ def _set_window_icon(root):
     ico_path = os.path.join(base_dir, "gfh_icon.ico")
     if os.path.exists(ico_path):
         try:
-            root.iconbitmap(default=False, bitmap=ico_path)
-            root.iconbitmap(ico_path)
+            root.iconbitmap(default=ico_path)
+            root.after(200, lambda p=ico_path: root.iconbitmap(default=p))
             return
         except Exception:
             pass
@@ -1000,8 +1000,8 @@ def _set_window_icon(root):
         ico_path = os.path.join(tmp_dir, "gfh_app_icon.ico")
         with open(ico_path, "wb") as f:
             f.write(data)
-        root.iconbitmap(default=False, bitmap=ico_path)
-        root.iconbitmap(ico_path)
+        root.iconbitmap(default=ico_path)
+        root.after(200, lambda p=ico_path: root.iconbitmap(default=p))
         return
     except Exception:
         pass
