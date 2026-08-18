@@ -1125,15 +1125,6 @@ class App:
         # Windows Snap (50% left/right, corners, Win+arrow) keeps working.
         self._apply_dynamic_geometry()
         root.configure(bg=LIGHT)
-        # Brute-force taskbar icon: set AppUserModelID so Windows taskbar
-        # shows our icon instead of the generic Python/PyInstaller icon
-        try:
-            import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                "GFHTelecom.App")
-        except Exception:
-            pass
-
         _set_window_icon(root)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
         self.theme_manager = ThemeManager("GFH Inventory Aging Processor", app_name="gfh-inventory-aging-processor")
@@ -1430,6 +1421,12 @@ def _enable_dpi_awareness() -> None:
 
 def main():
     _enable_dpi_awareness()
+    # Must be before the first tk.Tk() or Windows ignores it
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("GFHTelecom.InventoryAgingProcessor")
+    except Exception:
+        pass
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default=None)
     parser.add_argument("--no-email", action="store_true")
