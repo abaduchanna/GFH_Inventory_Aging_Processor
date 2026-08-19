@@ -51,7 +51,7 @@ class ThemeManager:
         }
     }
 
-    _PROTECTED_TAGS = {"header", "header_label", "brand", "logo", "run", "sched", "stop"}
+    _PROTECTED_TAGS = {"header", "header_label", "brand", "logo", "run", "sched", "stop", "footer"}
 
     def __init__(self, default="dark", app_name="GFH"):
         self.app_name = app_name
@@ -131,8 +131,13 @@ class ThemeManager:
 
             wtype = child.winfo_class()
             try:
+                # tk.Frame, ttk.Frame, tk.Toplevel, tk.Tk
                 if wtype in ("Frame", "Tk", "Toplevel"):
                     child.configure(bg=colors["bg"])
+                # tk.LabelFrame — winfo_class() returns "Labelframe" (lowercase f).
+                # This was previously missed, causing panels to stay white in dark mode.
+                elif wtype in ("Labelframe", "labelframe"):
+                    child.configure(bg=colors["panel"], fg=colors["text"])
                 elif wtype == "Label":
                     child.configure(bg=colors["bg"], fg=colors["text"])
                 elif wtype == "Button":
@@ -140,11 +145,26 @@ class ThemeManager:
                 elif wtype == "Entry":
                     child.configure(bg=colors["input"], fg=colors["text"], insertbackground=colors["text"])
                 elif wtype == "Text":
-                    child.configure(bg=colors["log_bg"], fg=colors["log_fg"], insertbackground=colors["log_fg"])
+                    child.configure(bg=colors.get("panel", colors["bg"]), fg=colors["text"], insertbackground=colors["text"])
                 elif wtype == "Listbox":
                     child.configure(bg=colors["input"], fg=colors["text"])
+                elif wtype == "ScrolledText":
+                    child.configure(bg=colors.get("panel", colors["bg"]), fg=colors["text"], insertbackground=colors["text"])
                 elif wtype == "PanedWindow":
                     child.configure(bg=colors["bg"])
+                elif wtype == "Checkbutton":
+                    child.configure(bg=colors["bg"], fg=colors["text"],
+                                    activebackground=colors["bg"], activeforeground=colors["text"],
+                                    selectcolor=colors["panel"])
+                elif wtype == "Radiobutton":
+                    child.configure(bg=colors["bg"], fg=colors["text"],
+                                    activebackground=colors["bg"], activeforeground=colors["text"],
+                                    selectcolor=colors["panel"])
+                elif wtype == "Combobox":
+                    try:
+                        child.configure(bg=colors["input"], fg=colors["text"])
+                    except tk.TclError:
+                        pass
             except tk.TclError:
                 pass
             self._walk(child, colors)
