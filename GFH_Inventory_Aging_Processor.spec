@@ -30,6 +30,7 @@ a = Analysis(
         'logo_handler',
         'PIL',
         'gspread',
+        'pandas',
     ],
     hookspath=[],
     hooksconfig={},
