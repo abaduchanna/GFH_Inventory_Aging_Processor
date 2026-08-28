@@ -156,19 +156,19 @@ CONTACTS_CONFIG_FILE = "gfh_aging_contacts.json"
 # the app's Settings dialog afterward — this is just the starting point.
 _DEFAULT_SENDER = {
     "sender_name": "Abad Umair Channa",
-    "sender_email": "[REDACTED]",
+    "sender_email": "sender@example.com",
     "sender_title": "Senior Inventory & Supply Chain Analyst",
     "sender_mobile": "346-385-9107",
     "cc_name": "",
     "cc_email": "",
 }
 _DEFAULT_DISTRICTS = {
-    "Arizona":       {"name": "Mohammad Farhan Mohiuddin", "email": "[REDACTED]"},
-    "Houston":       {"name": "Muhammad Hamza",            "email": "[REDACTED]"},
-    "Louisiana":     {"name": "Asif Khan",                 "email": "[REDACTED]"},
-    "Colorado West": {"name": "Raiyan Baig",               "email": "[REDACTED]"},
-    "Colorado East": {"name": "Shehriyar Ali",             "email": "[REDACTED]"},
-    "Tennessee":     {"name": "Ahmed Siraj",                "email": "[REDACTED]"},
+    "Arizona":       {"name": "Mohammad Farhan Mohiuddin", "email": "arizona@example.com"},
+    "Houston":       {"name": "Muhammad Hamza",            "email": "houston@example.com"},
+    "Louisiana":     {"name": "Asif Khan",                 "email": "louisiana@example.com"},
+    "Colorado West": {"name": "Raiyan Baig",               "email": "colorado-west@example.com"},
+    "Colorado East": {"name": "Shehriyar Ali",             "email": "colorado-east@example.com"},
+    "Tennessee":     {"name": "Ahmed Siraj",                "email": "tennessee@example.com"},
 }
 
 
