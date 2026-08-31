@@ -21,6 +21,13 @@ Pick an Inventory Aging Excel export, then:
     6. Build an "Executive Dashboard" tab highlighting key KPIs and risks.
     7. Every run reconciles the Google Sheet to exactly today's data.
 
+EXCLUSIONS PANEL:
+    Stores / IMEIs listed there are removed from the Google Sheets upload
+    (district tabs + Executive Dashboard) and from the district files that
+    get emailed via Outlook. "Always-blocked IMEIs" are removed from BOTH
+    pipelines at cleaning time. Everything is editable in the app and saved
+    to gfh_aging_exclusions.json next to the app.
+
 Install once:
     pip install pandas openpyxl gspread gspread-formatting pywin32 tkinterdnd2 pillow
 
@@ -146,10 +153,15 @@ COPYRIGHT_TEXT = f"Developed by Abad Umair Channa | Copyright © {date.today().y
 # ── Local Excel + Email config ──
 MIN_AGE       = 20
 KEEP_COLUMNS  = ["District","Store","Product Desc Full","Serial 1","Age in Company"]
-BLOCKED_IMEIS = {"358975210745726","350776860110726","358975210799012",
-                 "358975210797339","354709280259373","358975210792793",""," "}
+# Seed for the Exclusions panel's "Always-blocked IMEIs" box on the very
+# first run only. After that gfh_aging_exclusions.json is the single source
+# of truth (editable in the Exclusions dialog). Blank-entry guards ("", " ")
+# are unnecessary now that blank serials are removed separately.
+BLOCKED_IMEIS = {"358975210745726", "350776860110726", "358975210799012",
+                 "358975210797339", "354709280259373", "358975210792793"}
 
 CONTACTS_CONFIG_FILE = "gfh_aging_contacts.json"
+EXCLUSIONS_CONFIG_FILE = "gfh_aging_exclusions.json"
 
 # Used only to seed gfh_aging_contacts.json the very first time it's created.
 # Everything here is editable (and district rows are addable/removable) from
@@ -279,6 +291,115 @@ def get_app_dir() -> str:
 
 
 # ==========================================================
+# EXCLUSIONS (stores / IMEIs hidden from outputs)
+# ==========================================================
+
+def normalize_imei(value):
+    """Digits-only form of an IMEI entry (spaces, dashes, dots ignored).
+    Used both to clean user input from the Exclusions panel and to compare
+    Serial 1 values against it."""
+    return re.sub(r"\D", "", "" if value is None else str(value))
+
+
+def store_matches_pattern(store_value, pattern):
+    """Case-insensitive store match: equal OR either side contains the other,
+    so typing 'houston #12' matches 'Houston #12' exactly and typing
+    'houston' matches every store whose name contains it (and pasting a
+    longer full name still matches a shorter store cell)."""
+    s = ("" if store_value is None else str(store_value)).strip().casefold()
+    p = ("" if pattern is None else str(pattern)).strip().casefold()
+    if not s or not p:
+        return False
+    return p in s or s in p
+
+
+def load_exclusions() -> dict:
+    """Load the exclusions config: stores / IMEIs hidden from the Google
+    Sheets upload + emailed district files, and always-blocked IMEIs removed
+    from BOTH pipelines at cleaning time. On first run the file is seeded,
+    migrating the old hardcoded BLOCKED_IMEIS list so behaviour stays
+    identical until the user edits it in the Exclusions panel."""
+    path = os.path.join(get_app_dir(), EXCLUSIONS_CONFIG_FILE)
+    exc = {"stores": [], "imeis": [], "blocked_imeis": sorted(BLOCKED_IMEIS)}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for k in ("stores", "imeis", "blocked_imeis"):
+                vals = saved.get(k, [])
+                if isinstance(vals, list):
+                    exc[k] = [str(v).strip() for v in vals if str(v).strip()]
+        except Exception:
+            pass
+    else:
+        save_exclusions(exc)
+    return exc
+
+
+def save_exclusions(exc: dict) -> None:
+    """Persist the exclusions config, trimming blanks, normalizing IMEI
+    entries to digits and de-duplicating (case-insensitive for stores)."""
+    path = os.path.join(get_app_dir(), EXCLUSIONS_CONFIG_FILE)
+    clean = {}
+    for k in ("stores", "imeis", "blocked_imeis"):
+        seen, out = set(), []
+        for v in exc.get(k, []):
+            v = ("" if v is None else str(v)).strip()
+            if not v:
+                continue
+            if k != "stores":
+                v = normalize_imei(v) or v
+            key = v.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(v)
+        clean[k] = out
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(clean, f, indent=2, ensure_ascii=False)
+
+
+def apply_output_exclusions(df, col_serial, col_store, log=print):
+    """Remove excluded stores/IMEIs from an OUTBOUND dataset (the Google
+    Sheets district tabs + Executive Dashboard, or the district .xlsx files
+    that get emailed). IMEIs compare digits-only; stores match per
+    store_matches_pattern. Logs exactly what was removed. Returns the
+    filtered DataFrame (input untouched)."""
+    exc = load_exclusions()
+    store_pats = [s for s in exc.get("stores", []) if s.strip()]
+    imei_set = {normalize_imei(x) for x in exc.get("imeis", [])}
+    imei_set.discard("")
+    if not store_pats and not imei_set:
+        return df
+
+    before = len(df)
+    if store_pats:
+        stores = df[col_store].fillna("").astype(str).str.strip()
+        bad = {u for u in stores.unique()
+               if any(store_matches_pattern(u, p) for p in store_pats)}
+        if bad:
+            df = df[~stores.isin(list(bad))]
+            shown = ", ".join(sorted(bad)[:8]) + (" ..." if len(bad) > 8 else "")
+            log(f"  Exclusions: removed {before - len(df)} row(s) from excluded store(s): {shown}")
+        before = len(df)
+    if imei_set:
+        serials = df[col_serial].astype(str).str.strip().map(normalize_imei)
+        df = df[~serials.isin(list(imei_set))]
+        log(f"  Exclusions: removed {before - len(df)} row(s) from excluded IMEI(s).")
+    return df
+
+
+def log_exclusions_summary(log=print):
+    """One-line Activity Log summary of what the Exclusions panel will do."""
+    exc = load_exclusions()
+    n_s = len([s for s in exc.get("stores", []) if s.strip()])
+    n_i = len([x for x in exc.get("imeis", []) if normalize_imei(x)])
+    n_b = len([x for x in exc.get("blocked_imeis", []) if normalize_imei(x)])
+    log(f"Exclusions: {n_s} store(s) + {n_i} IMEI(s) hidden from Sheet/emails; "
+        f"{n_b} always-blocked IMEI(s) removed at cleaning.")
+
+
+# ==========================================================
 # DATA CLEANING / PROCESSING
 # ==========================================================
 class PipelineError(Exception):
@@ -340,9 +461,13 @@ def load_and_clean(excel_path, log):
     df = df[(df[col_serial] != "") & (df[col_serial].str.lower() != "nan")]
     log(f"  Removed {before - len(df)} row(s) with blank Serial 1.")
 
-    # Remove blocked IMEIs
+    # Remove always-blocked IMEIs (editable in the Exclusions panel;
+    # compared digits-only so formatted serials still match)
+    _blocked = {normalize_imei(x) for x in load_exclusions().get("blocked_imeis", [])}
+    _blocked.discard("")
     before2 = len(df)
-    df = df[~df[col_serial].isin(BLOCKED_IMEIS)]
+    if _blocked:
+        df = df[~df[col_serial].astype(str).str.strip().map(normalize_imei).isin(list(_blocked))]
     log(f"  Removed {before2 - len(df)} blocked IMEI row(s).")
 
     # Convert numeric columns
@@ -366,7 +491,12 @@ def build_aged_subset(df, col_age, log):
 
 
 
-def build_district_tabs(aged, col_store, col_desc, col_serial, col_age, col_po, log):
+def build_district_tabs(aged, col_store, col_desc, col_serial, col_age, col_po, log,
+                        ensure_districts=None):
+    """One tab per district. ensure_districts forces an (empty) tab for every
+    listed district that has zero rows left after exclusions, so those
+    districts still get an empty Google Sheet tab instead of their old tab
+    being silently removed as leftover."""
     tabs = {}
     for district in sorted(aged["_District"].dropna().unique()):
         if not district:
@@ -384,6 +514,18 @@ def build_district_tabs(aged, col_store, col_desc, col_serial, col_age, col_po, 
         ).sort_values(["Store", "Age in Company"], ascending=[True, False]).reset_index(drop=True)
         tabs[district] = tab_df
         log(f"  {district}: {len(tab_df)} aged device row(s)")
+
+    if ensure_districts:
+        for district in sorted(set(ensure_districts) - set(tabs)):
+            tabs[district] = pd.DataFrame({
+                "District": pd.Series(dtype=str),
+                "Store": pd.Series(dtype=str),
+                "Product Description": pd.Series(dtype=str),
+                "Serial 1": pd.Series(dtype=str),
+                "Age in Company": pd.Series(dtype=float),
+                "PO Date": pd.Series(dtype=str),
+            })
+            log(f"  {district}: 0 aged device row(s) (all devices excluded)")
     return tabs
 
 
@@ -871,8 +1013,12 @@ def run_local_pipeline(excel_path, log, send_email=True):
     aged = df[df[col_age] >= MIN_AGE].copy()
     log(f"  {len(aged)} of {len(df)} devices are aged {MIN_AGE}+ days.")
 
+    # District list BEFORE exclusions, so a district whose devices were all
+    # excluded still gets its (empty) file and email this run.
     districts = sorted(aged["_District"].dropna().unique())
     log(f"  Districts: {', '.join(districts)}")
+    log_exclusions_summary(log)
+    aged = apply_output_exclusions(aged, col_serial, col_store, log)
     log("")
 
     saved = []
@@ -921,10 +1067,16 @@ def run_google_pipeline(excel_path, log):
     log("")
     log(f"Filtering to devices aged over {AGE_THRESHOLD_DAYS} days...")
     aged = build_aged_subset(df, col_age, log)
+    pre_excl_districts = sorted(aged["_District"].dropna().unique())
+
+    log("")
+    log_exclusions_summary(log)
+    aged = apply_output_exclusions(aged, col_serial, col_store, log)
 
     log("")
     log("Building one tab per district...")
-    district_tabs = build_district_tabs(aged, col_store, col_desc, col_serial, col_age, col_po, log)
+    district_tabs = build_district_tabs(aged, col_store, col_desc, col_serial, col_age, col_po, log,
+                                        ensure_districts=pre_excl_districts)
 
     total_count = len(aged)
     total_loss = float(pd.to_numeric(aged[col_retail], errors="coerce").sum())
@@ -1110,6 +1262,136 @@ class SettingsDialog(tk.Toplevel):
         self.destroy()
 
 
+class ExclusionsDialog(tk.Toplevel):
+    """Paste-box panel controlling what leaves this app:
+
+      - Stores / IMEIs boxes: hidden from the Google Sheets upload (district
+        tabs + Executive Dashboard) and from the district .xlsx files that
+        get emailed via Outlook.
+      - Always-blocked IMEIs box: removed from BOTH pipelines at cleaning
+        time (this box took over the old hardcoded BLOCKED_IMEIS list).
+
+    One entry per line; everything persists to gfh_aging_exclusions.json
+    next to the app and survives restarts."""
+
+    _KEYS = ("stores", "imeis", "blocked_imeis")
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Exclusions — Stores & IMEIs")
+        self.configure(bg=LIGHT)
+        self.resizable(False, True)
+        self.transient(parent)
+        self.grab_set()
+
+        exc = load_exclusions()
+        self._boxes = {}
+        self._counts = {}
+
+        spec = [
+            ("stores",
+             "Stores to exclude (Google Sheet + emailed files)",
+             "One store per line. A store is excluded when its name equals the entry "
+             "or either side contains the other (case ignored).",
+             9),
+            ("imeis",
+             "IMEIs to exclude (Google Sheet + emailed files)",
+             "One IMEI per line. Spaces and dashes are ignored when matching.",
+             9),
+            ("blocked_imeis",
+             "Always-blocked IMEIs (removed from EVERY pipeline at cleaning)",
+             "These never appear anywhere — migrated from the old hardcoded block list.",
+             7),
+        ]
+
+        for key, title, hint, height in spec:
+            frame = tk.LabelFrame(self, text=title, bg=LIGHT, fg=NAVY,
+                                  font=("Calibri", 10, "bold"))
+            frame.pack(fill="both", expand=True, padx=12, pady=(10, 2))
+            tk.Label(frame, text=hint, bg=LIGHT, fg="#666",
+                     font=("Calibri", 8), wraplength=540, justify="left"
+                     ).pack(anchor="w", padx=8, pady=(4, 2))
+            box = scrolledtext.ScrolledText(
+                frame, height=height, font=("Consolas", 9),
+                bg=WHITE, fg=COLOR_TEXT, relief="flat", wrap="word",
+                highlightbackground="#b0c4de", highlightthickness=1)
+            box.pack(fill="both", expand=True, padx=8, pady=(0, 2))
+            box.insert("1.0", "\n".join(exc.get(key, [])))
+            cnt = tk.Label(frame, text="", bg=LIGHT, fg=NAVY,
+                           font=("Calibri", 8, "bold"))
+            cnt.pack(anchor="e", padx=8, pady=(0, 6))
+            box.bind("<KeyRelease>",
+                     lambda e, k=key, b=box, c=cnt: self._update_count(k, b, c))
+            self._boxes[key] = box
+            self._counts[key] = cnt
+            self._update_count(key, box, cnt)
+
+        btn_row = tk.Frame(self, bg=LIGHT)
+        btn_row.pack(fill="x", padx=12, pady=(8, 12))
+        ttk.Button(btn_row, text="Save", style="Run.TButton",
+                   command=self._save).pack(side="right", padx=(6, 0))
+        ttk.Button(btn_row, text="Cancel", style="Browse.TButton",
+                   command=self.destroy).pack(side="right")
+        ttk.Button(btn_row, text="Clear All", style="Browse.TButton",
+                   command=self._clear).pack(side="left")
+
+    @staticmethod
+    def _parse(box):
+        """Non-empty, de-duplicated (case-insensitive) lines of a paste box."""
+        seen, out = set(), []
+        for line in box.get("1.0", "end").splitlines():
+            v = line.strip()
+            if not v:
+                continue
+            k = v.casefold()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(v)
+        return out
+
+    def _update_count(self, key, box, cnt):
+        entries = self._parse(box)
+        label = {"stores": "store(s)", "imeis": "IMEI(s)",
+                 "blocked_imeis": "blocked IMEI(s)"}[key]
+        bad = [e for e in entries
+               if key != "stores" and normalize_imei(e)
+               and len(normalize_imei(e)) != 15]
+        text = f"{len(entries)} {label}"
+        if bad:
+            text += f"   |   {len(bad)} not 15 digits"
+            cnt.configure(fg=RED_DARK)
+        else:
+            cnt.configure(fg=NAVY)
+        cnt.configure(text=text)
+
+    def _clear(self):
+        for key, box in self._boxes.items():
+            box.delete("1.0", "end")
+            self._update_count(key, box, self._counts[key])
+
+    def _save(self):
+        exc = {k: self._parse(self._boxes[k]) for k in self._KEYS}
+        warnings = []
+        for key in ("imeis", "blocked_imeis"):
+            bad = [e for e in exc[key] if len(normalize_imei(e)) != 15]
+            if bad:
+                shown = ", ".join(bad[:6]) + ("..." if len(bad) > 6 else "")
+                warnings.append(f"{key.replace('_', ' ')}: {shown}")
+        if warnings:
+            if not messagebox.askyesno(
+                    "Non-15-digit IMEIs",
+                    "These entries do not look like 15-digit IMEIs:\n\n"
+                    + "\n".join(warnings)
+                    + "\n\nThey are still saved and compared digits-only.\n\nSave anyway?",
+                    parent=self):
+                return
+        save_exclusions(exc)
+        messagebox.showinfo("Saved", "Exclusions saved to gfh_aging_exclusions.json",
+                            parent=self)
+        self.destroy()
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -1284,6 +1566,10 @@ class App:
                                         style="Browse.TButton", command=self._open_settings)
         self.settings_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
+        self.excl_btn = ttk.Button(btn_row, text="Exclusions",
+                                    style="Browse.TButton", command=self._open_exclusions)
+        self.excl_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
         # Progress
         self.progress = ttk.Progressbar(body, mode="indeterminate",
                                       style="Accent.Horizontal.TProgressbar")
@@ -1299,6 +1585,9 @@ class App:
 
     def _open_settings(self):
         SettingsDialog(self.root)
+
+    def _open_exclusions(self):
+        ExclusionsDialog(self.root)
 
     def _copyright_bar(self):
         bar = tk.Frame(self.root, bg=NAVY, height=26)

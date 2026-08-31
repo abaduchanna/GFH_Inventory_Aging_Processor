@@ -50,6 +50,28 @@ if errorlevel 1 (
 echo    Python + PyInstaller OK
 echo.
 
+REM ── Step 0.5: Self-update from GitHub (only if this folder is a git clone) ──
+echo  Step 0.5: Checking for updates from GitHub...
+if exist ".git" (
+    REM Self-heal: an old clone may carry a dead embedded token in origin - reset to the clean public URL.
+    git remote set-url origin "https://github.com/abaduchanna/gfh-inventory-aging-processor.git" >nul 2>&1
+    git fetch origin main >nul 2>&1
+    if errorlevel 1 (
+        echo    Could not reach GitHub - building the local code as-is.
+    ) else (
+        git stash push -m "auto-pre-build" >nul 2>&1
+        git reset --hard origin/main >nul 2>&1
+        if errorlevel 1 (
+            echo    WARNING: repo update failed - building the local code as-is.
+        ) else (
+            echo    Updated to the latest GitHub code.
+        )
+    )
+) else (
+    echo    Not a git clone - building the local code as-is.
+)
+echo.
+
 REM ── Step 1: Clean previous build artifacts ──
 echo  Step 1: Cleaning previous build artifacts...
 if exist "build" (
