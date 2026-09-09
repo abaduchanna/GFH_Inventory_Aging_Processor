@@ -1484,12 +1484,7 @@ class App:
     def _header(self):
         self.header_mgr = FixedHeaderManager(self.root, title="GFH Inventory Aging Processor")
         self.header_mgr.add_theme_toggle(self.theme_manager, callback=self._apply_theme)
-        if hasattr(self.header_mgr, "header_frame"):
-            self.header_mgr.header_frame._tag = "header"
-            for child in self.header_mgr.header_frame.winfo_children():
-                child._tag = "header"
-                for grandchild in child.winfo_children():
-                    grandchild._tag = "header_label"
+        # header_manager already tags all header widgets at init — no override needed
         try:
             _lp = _resource_path(LOGO_PNG_NAME) if "_resource_path" in dir() else os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_PNG_NAME)
             if os.path.exists(_lp):
