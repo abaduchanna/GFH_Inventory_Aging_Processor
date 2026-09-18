@@ -1,5 +1,5 @@
 # Aging processor: Excel + Google Sheets + drag-drop
-# Developed by Abad Umair Channa
+# Developed by www.3SVerse.com
 
 openpyxl>=3.1.0
 Pillow>=9.0.0

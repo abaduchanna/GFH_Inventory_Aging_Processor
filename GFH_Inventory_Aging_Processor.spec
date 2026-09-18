@@ -3,7 +3,7 @@ import datetime as _dt
 _year = _dt.date.today().year
 
 SPEC_DOC = f"""PyInstaller spec
-Developed by Abad Umair Channa \u00a9 {_year}
+Developed by www.3SVerse.com \u00a9 {_year}
 Build command: pyinstaller GFH_Inventory_Aging_Processor.spec
 """
 
