@@ -31,7 +31,7 @@ EXCLUSIONS PANEL:
 Install once:
     pip install pandas openpyxl gspread gspread-formatting pywin32 tkinterdnd2 pillow
 
-Developed by Abad Umair Channa | Copyright © {date.today().year} | All rights reserved.
+Developed by www.3SVerse.com | Copyright © {date.today().year} | All rights reserved.
 """
 
 import os, sys, re, io, json, base64, tempfile, threading, traceback, queue, argparse, webbrowser
@@ -148,7 +148,7 @@ COLOR_TEXT  = "#1c1c1c"
 COLOR_LOG_BG = "#0d0d1f"
 COLOR_LOG_TEXT = "#d7e3f0"
 
-COPYRIGHT_TEXT = f"Developed by Abad Umair Channa | Copyright © {date.today().year} | All rights reserved."
+COPYRIGHT_TEXT = f"Developed by www.3SVerse.com | Copyright © {date.today().year} | All rights reserved."
 
 # ── Local Excel + Email config ──
 MIN_AGE       = 20
