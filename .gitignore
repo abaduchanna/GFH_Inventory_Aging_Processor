@@ -25,3 +25,6 @@ logs/
 ocr_debug/
 portal_downloads/
 *.log
+_protect_done.json
+vxrun*.py
+*.pyd
