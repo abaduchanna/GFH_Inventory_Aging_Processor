@@ -131,7 +131,7 @@ if _optional_missing:
 # CONFIGURATION
 # ==========================================================
 APP_TITLE = "GFH Inventory Aging Processor"
-ICON_ICO_NAME = "gfh_icon.ico"      # used for taskbar + titlebar (Windows .ico)
+ICON_ICO_NAME = "GFH_icon.ico"      # used for taskbar + titlebar (Windows .ico)
 LOGO_PNG_NAME = "GFH_Telecom_Logo.png"        # used in the header (resized at runtime via PIL)
 
 NAVY       = "#090d26"
@@ -1122,7 +1122,7 @@ def _set_window_icon(root):
     # 1. Try sys._MEIPASS (PyInstaller onefile extraction dir)
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        ico_path = os.path.join(meipass, "gfh_icon.ico")
+        ico_path = os.path.join(meipass, "GFH_icon.ico")
         if os.path.exists(ico_path):
             try:
                 root.iconbitmap(default=ico_path)
@@ -1136,7 +1136,7 @@ def _set_window_icon(root):
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-    ico_path = os.path.join(base_dir, "gfh_icon.ico")
+    ico_path = os.path.join(base_dir, "GFH_icon.ico")
     if os.path.exists(ico_path):
         try:
             root.iconbitmap(default=ico_path)
