@@ -132,15 +132,15 @@ class FixedHeaderManager:
         
         self.theme_toggle_btn = tk.Button(
             self.right_frame,
-            text="☀️" if theme_manager.current_theme == "dark" else "🌙",
+            text="\u2600" if theme_manager.current_theme == "dark" else "\u263e",
             command=toggle_and_callback,
             bg=self.BRAND_NAVY,
             fg="white",
-            activebackground=self.BRAND_RED,
+            activebackground=self.BRAND_NAVY,  # blend = transparent (Tk has no alpha)
             activeforeground="white",
             relief=tk.FLAT,
             width=3,
-            font=("Segoe UI Emoji", 13),
+            font=("Segoe UI Symbol", 13),
             cursor="hand2",
             highlightthickness=0,
             borderwidth=0
@@ -177,7 +177,7 @@ class FixedHeaderManager:
     def update_button_text(self):
         """Update toggle button text ONLY - never change header colors."""
         if self.theme_toggle_btn and self.theme_manager:
-            new_text = "🌙" if self.theme_manager.current_theme == "light" else "☀️"
+            new_text = "\u263e" if self.theme_manager.current_theme == "light" else "\u2600"
             self.theme_toggle_btn.configure(text=new_text)
         
         if self.copyright_label and self.theme_manager:

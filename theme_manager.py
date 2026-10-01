@@ -197,26 +197,37 @@ class ThemeManager:
             self._walk(child, colors)
 
     def create_theme_toggle_button(self, parent, callback=None):
-        """Create a theme toggle button."""
+        """Create a theme toggle button.
+
+        Blend into the parent header: parent-matching background is
+        Tkinter's equivalent of transparency (Tk widgets have no alpha).
+        Shows a SUN while the dark theme is active (click -> light) and a
+        MOON while light is active (click -> dark)."""
         import tkinter as tk
 
-        colors = self.get_colors()
+        try:
+            bg = parent.cget("bg")
+        except Exception:
+            # ttk parents have no -bg option; use the brand band navy.
+            bg = self.BRAND_NAVY
+
         btn = tk.Label(
             parent,
-            text="🌙" if self.current_theme == "dark" else "☀️",
-            bg=self.BRAND_RED,
+            text="\u2600" if self.current_theme == "dark" else "\u263e",
+            bg=bg,
             fg=self.BRAND_WHITE,
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI Symbol", 13),
             cursor="hand2",
             padx=8,
             pady=2,
         )
+        btn._tag = "header_label"  # theme walks must never recolor it
         btn.bind("<Button-1>", lambda e: self._on_toggle(btn, callback))
         return btn
 
     def _on_toggle(self, btn, callback):
         new_theme = self.toggle()
-        btn.configure(text="🌙" if new_theme == "dark" else "☀️")
+        btn.configure(text="\u2600" if new_theme == "dark" else "\u263e")
         if callback:
             callback(new_theme)
 
@@ -238,3 +249,54 @@ def apply_theme_to_window(window, theme_manager=None):
 
 def get_copyright_year():
     return ThemeManager.get_copyright_year()
+
+
+# ── Theme-toggle vector glyph (sun / crescent moon) ─────────────────────────
+# Tk renders emoji (☀️/🌙) as flat monochrome outlines, where a small sun is
+# easy to mistake for a moon. Drawing the icon as vector art on a canvas gives
+# a genuinely transparent background AND an unmistakable glyph: dark theme
+# shows a sun (ring + 8 rays — click goes light), light theme shows a real
+# crescent (click goes dark).
+
+def draw_theme_glyph(canvas, cx, cy, theme, tags=("theme_toggle",), color="#ffffff"):
+    """Paint the theme-toggle glyph for `theme` centered at (cx, cy).
+
+    Items are created with the given `tags`; callers own deleting and
+    re-drawing (e.g. on <Configure>) and can tag_bind clicks/cursor on the
+    tag — canvas tag bindings also apply to items created later with the
+    same tag.
+    """
+    import math
+
+    if theme == "light":
+        # Crescent: outer disc minus an equal-radius disc offset right.
+        R = 8.0
+        d = 5.5
+        half = math.acos(d / (2 * R))
+        pts = []
+        steps = 36
+        sweep = 2 * math.pi - 2 * half
+        for i in range(steps + 1):
+            a = -half - sweep * i / steps
+            pts.append((cx + R * math.cos(a), cy + R * math.sin(a)))
+        a_end = math.atan2(R * math.sin(half), R * math.cos(half) - d)
+        a_start = math.atan2(R * math.sin(-half), R * math.cos(-half) - d)
+        for i in range(steps + 1):
+            a = a_end + (math.pi - a_end) * i / steps
+            pts.append((cx + d + R * math.cos(a), cy + R * math.sin(a)))
+        for i in range(steps + 1):
+            a = -math.pi + (a_start + math.pi) * i / steps
+            pts.append((cx + d + R * math.cos(a), cy + R * math.sin(a)))
+        canvas.create_polygon(pts, smooth=True, fill=color,
+                              outline="", width=0, tags=tags)
+    else:
+        # Sun: ring + 8 rays.
+        r = 6.0
+        canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
+                           outline=color, width=2, tags=tags)
+        for i in range(8):
+            a = math.radians(i * 45)
+            canvas.create_line(
+                cx + math.cos(a) * (r + 2.5), cy + math.sin(a) * (r + 2.5),
+                cx + math.cos(a) * (r + 6.5), cy + math.sin(a) * (r + 6.5),
+                fill=color, width=2, tags=tags)
