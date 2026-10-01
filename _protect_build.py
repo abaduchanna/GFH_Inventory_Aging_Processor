@@ -15,8 +15,9 @@ What it does
 5. Rewrites the specs:
       - Analysis(['app.py', ...])  -> Analysis(['vxrun<n>.py', ...])
       - datas lines that ship .py sources are removed,
-      - hiddenimports gains compiled module names + every third-party
-        top-level import found in the compiled sources (hooks still fire).
+      - hiddenimports gains compiled module names + every import (stdlib and
+        third-party) found in the compiled sources (hooks still fire).
+
 6. Idempotent: safe to run twice (marker file).
 
 Result: extraction tools (pyinstxtractor + decompilers) can only recover the
@@ -26,6 +27,7 @@ Usage:  python _protect_build.py [--dry-run]
 Exits non-zero on any problem so CI fails loudly.
 """
 import ast
+import importlib.util
 import os
 import re
 import subprocess
@@ -33,7 +35,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent
 MARKER = ROOT / "_protect_done.json"
+# Bump when the protection OUTPUT changes shape (hiddenimports policy, stub
+# format, ...): markers written by older runs lose their "already done"
+# status and the pass redoes itself from a clean state instead of reusing
+# stale patched specs / stubs / pyds.
+PROTO = 2
 STDLIB = getattr(sys, "stdlib_module_names", frozenset())
 
 LAUNCHER_TMPL = '''\
@@ -305,12 +313,39 @@ def cython_compat_fix(path):
     return changed
 
 
+def deprotect():
+    """Undo an older protection pass so this run starts from pristine sources.
+
+    Older passes leave behind patched specs (pointing at launcher stubs),
+    vxrun<N>.py stubs, compiled .pyd/.so extensions and the marker file -
+    none of which a fresh pass can safely build on."""
+    for args in (["git", "checkout", "--", "*.spec"],
+                 ["git", "checkout", "--", "*.py"]):
+        subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
+    for pat in ("vxrun*.py", "*.pyd", "*.so"):
+        for p in ROOT.rglob(pat):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    if MARKER.is_file():
+        MARKER.unlink()
+    log("deprotect: specs/sources restored, stubs + pyds + marker removed")
+
+
 def main():
     dry = "--dry-run" in sys.argv
 
     if MARKER.is_file():
-        log("already protected (marker present) - nothing to do")
-        return 0
+        try:
+            proto = int(MARKER.read_text(encoding="utf-8").strip())
+        except Exception:
+            proto = 0
+        if proto >= PROTO:
+            log("already protected (marker present) - nothing to do")
+            return 0
+        log(f"protection proto {proto} is older than {PROTO} - redoing from a clean state")
+        deprotect()
 
     specs = sorted(p for p in ROOT.glob("*.spec"))
     if not specs:
@@ -327,8 +362,12 @@ def main():
     log("entries: " + ", ".join(entries))
 
     # ---- transitive local module discovery ----------------------------
-    compiled = {}        # rel Path -> dotted module name (entries included)
-    third_party = set()  # top-level third-party import names
+    compiled = {}           # rel Path -> dotted module name (entries included)
+    runtime_imports = set()  # full dotted paths of ALL non-local imports
+                             # (stdlib AND third-party): PyInstaller only
+                             # analyzes the vxrun<N>.py launcher stubs, so it
+                             # can never see imports that live inside the
+                             # compiled .pyd bodies.
 
     def is_local_root_mod(name):
         return (ROOT / f"{name}.py").is_file()
@@ -346,7 +385,7 @@ def main():
             continue
         seen.add(py)
         rel = py.relative_to(ROOT)
-        tops, _dotted = parse_imports(py)
+        tops, dotted = parse_imports(py)
         for t in tops:
             if t in STDLIB:
                 continue
@@ -354,8 +393,23 @@ def main():
                 queue.append(ROOT / f"{t}.py")
             elif is_local_pkg(t):
                 queue.extend(sorted((ROOT / t).rglob("*.py")))
-            else:
-                third_party.add(t)
+        # hiddenimports must cover every import that lives only inside the
+        # compiled sources - STDLIB INCLUDED. Skipping stdlib here shipped
+        # EXEs that died at startup with "No module named 'json'".
+        for d in dotted:
+            head = d.split(".")[0]
+            if is_local_root_mod(head) or is_local_pkg(head):
+                continue  # shipped as a compiled hiddenimport already
+            if d in runtime_imports:
+                continue
+            try:
+                found = importlib.util.find_spec(d) is not None
+            except Exception:
+                found = False
+            if not found:
+                log(f"hiddenimports: '{d}' not importable here - skipped")
+                continue
+            runtime_imports.add(d)
         if rel not in compiled:
             compiled[rel] = ".".join(rel.with_suffix("").parts)
 
@@ -364,13 +418,13 @@ def main():
     log(f"modules to compile: {len(compiled)}")
     for rel, mod in sorted(compiled.items()):
         log(f"  {str(rel):60} -> {mod}")
-    log(f"third-party hiddenimports to inject: {sorted(third_party)}")
+    log(f"hiddenimports to inject: {sorted(runtime_imports)}")
 
     # ---- entry launcher mapping ----------------------------------------
     entry_plan = {e: f"vxrun{i}.py" for i, e in enumerate(entries, 1)}
 
     # ---- compute spec rewrites (validated in both modes) ---------------
-    add_hidden = sorted(third_party) + sorted(compiled.values())
+    add_hidden = sorted(runtime_imports) + sorted(compiled.values())
     spec_patches = {}
     # no Python source ships in any EXE: drop datas lines for every root .py
     names_to_unship = {p.with_suffix("").name for p in ROOT.glob("*.py")} \
@@ -466,7 +520,7 @@ def main():
         spec.write_text(spec_patches[spec.name], encoding="utf-8")
         log(f"{spec.name}: patched")
 
-    MARKER.write_text("{}", encoding="utf-8")
+    MARKER.write_text(str(PROTO), encoding="utf-8")
     # Local builds only: restore the deleted .py files from git so the
     # developer's working tree keeps its sources. (The compiled .pyd
     # extensions still take import precedence over the .py files, and the
