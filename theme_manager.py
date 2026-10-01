@@ -300,3 +300,37 @@ def draw_theme_glyph(canvas, cx, cy, theme, tags=("theme_toggle",), color="#ffff
                 cx + math.cos(a) * (r + 2.5), cy + math.sin(a) * (r + 2.5),
                 cx + math.cos(a) * (r + 6.5), cy + math.sin(a) * (r + 6.5),
                 fill=color, width=2, tags=tags)
+
+
+# ── Standard theme-toggle canvas (vector sun/crescent, right-center) ────────
+# One shared builder for ALL 3SVerse apps: a vector sun (dark theme) /
+# crescent moon (light theme) drawn on a flat canvas — genuinely transparent
+# on the navy header, and an unmistakable glyph (Tk renders emoji as flat
+# monochrome outlines where a small sun is easy to mistake for a moon).
+# Click runs on_click() (app-specific toggle + apply), then redraws.
+def create_toggle_canvas(parent, theme_manager, on_click, size=36, bg="#090d26"):
+    import tkinter as tk
+
+    canvas = tk.Canvas(parent, width=size, height=size, bg=bg,
+                       highlightthickness=0, bd=0, cursor="hand2")
+
+    def render():
+        canvas.delete("theme_toggle")
+        draw_theme_glyph(
+            canvas, size / 2.0, size / 2.0,
+            "dark" if getattr(theme_manager, "current_theme", "light") == "dark" else "light",
+            tags=("theme_toggle",),
+        )
+
+    def _click(_event=None):
+        try:
+            if on_click:
+                on_click()
+        finally:
+            render()
+
+    canvas.bind("<Button-1>", _click)
+    canvas._render_theme_glyph = render
+    canvas._tag = "header"
+    render()
+    return canvas

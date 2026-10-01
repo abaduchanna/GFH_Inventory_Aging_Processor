@@ -70,7 +70,7 @@ class FixedHeaderManager:
         # RIGHT: Theme toggle — must pack BEFORE center so it anchors to the right
         # edge and the center title can truly center in the remaining middle space.
         self.right_frame = tk.Frame(self.header_frame, bg=self.BRAND_NAVY)
-        self.right_frame.pack(side=tk.RIGHT, padx=(0, 18), pady=9)
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 18), pady=9)
 
         self.theme_toggle_btn = None
         self.copyright_label = None
@@ -130,22 +130,14 @@ class FixedHeaderManager:
         
         colors = theme_manager.get_colors()
         
-        self.theme_toggle_btn = tk.Button(
-            self.right_frame,
-            text="\u2600" if theme_manager.current_theme == "dark" else "\u263e",
-            command=toggle_and_callback,
+        # STANDARD theme toggle (all 3SVerse apps): vector sun/crescent glyph on a
+        # canvas - right-center aligned, transparent on the navy header.
+        from theme_manager import create_toggle_canvas
+        self.theme_toggle_btn = create_toggle_canvas(
+            self.right_frame, theme_manager, toggle_and_callback,
             bg=self.BRAND_NAVY,
-            fg="white",
-            activebackground=self.BRAND_NAVY,  # blend = transparent (Tk has no alpha)
-            activeforeground="white",
-            relief=tk.FLAT,
-            width=3,
-            font=("Segoe UI Symbol", 13),
-            cursor="hand2",
-            highlightthickness=0,
-            borderwidth=0
         )
-        self.theme_toggle_btn.pack(side=tk.TOP, pady=5)
+        self.theme_toggle_btn.pack(expand=True)
         self.theme_toggle_btn._tag = "header"
 
     def add_copyright(self, theme_manager):
@@ -177,8 +169,9 @@ class FixedHeaderManager:
     def update_button_text(self):
         """Update toggle button text ONLY - never change header colors."""
         if self.theme_toggle_btn and self.theme_manager:
-            new_text = "\u263e" if self.theme_manager.current_theme == "light" else "\u2600"
-            self.theme_toggle_btn.configure(text=new_text)
+            render = getattr(self.theme_toggle_btn, "_render_theme_glyph", None)
+            if render:
+                render()
         
         if self.copyright_label and self.theme_manager:
             self.copyright_label.configure(
