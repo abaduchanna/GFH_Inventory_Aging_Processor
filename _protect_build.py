@@ -15,9 +15,9 @@ What it does
 5. Rewrites the specs:
       - Analysis(['app.py', ...])  -> Analysis(['vxrun<n>.py', ...])
       - datas lines that ship .py sources are removed,
-      - hiddenimports gains compiled module names + every import (stdlib and
-        third-party) found in the compiled sources (hooks still fire).
-
+      - hiddenimports gains compiled module names + every import (stdlib,
+        third-party, and from-import submodules like tkinter.ttk) found in
+        the compiled sources (hooks still fire).
 6. Idempotent: safe to run twice (marker file).
 
 Result: extraction tools (pyinstxtractor + decompilers) can only recover the
@@ -27,7 +27,6 @@ Usage:  python _protect_build.py [--dry-run]
 Exits non-zero on any problem so CI fails loudly.
 """
 import ast
-import importlib.util
 import os
 import re
 import subprocess
@@ -35,18 +34,29 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-ROOT = Path(__file__).resolve().parent
 MARKER = ROOT / "_protect_done.json"
+STDLIB = getattr(sys, "stdlib_module_names", frozenset())
+
 # Bump when the protection OUTPUT changes shape (hiddenimports policy, stub
 # format, ...): markers written by older runs lose their "already done"
 # status and the pass redoes itself from a clean state instead of reusing
 # stale patched specs / stubs / pyds.
-PROTO = 2
-STDLIB = getattr(sys, "stdlib_module_names", frozenset())
+PROTO = 3
 
 LAUNCHER_TMPL = '''\
 # 3SVerse protected build. All application logic ships as compiled native
 # extensions - this EXE contains no Python source and no Python bytecode.
+# PyInstaller cannot inspect imports inside native extensions. Pre-import
+# every verified module path so package submodules (notably tkinter.ttk and
+# tkinter.filedialog) exist before the compiled application starts.
+import importlib as _il
+
+for _m in ({preimports}):
+    try:
+        _il.import_module(_m)
+    except Exception:
+        pass
+
 import {module}  # compiled application core (runs on import)
 '''
 
@@ -216,7 +226,7 @@ def spec_entry_scripts(spec_text):
 
 
 def parse_imports(py_path):
-    """Top-level import names + full dotted paths from one .py file."""
+    """Top-level names plus every referenced dotted module path."""
     tops, dotted = set(), set()
     try:
         tree = ast.parse(py_path.read_text(encoding="utf-8"))
@@ -233,7 +243,27 @@ def parse_imports(py_path):
             if node.module:
                 dotted.add(node.module)
                 tops.add(node.module.split(".")[0])
+                for alias in node.names:
+                    if alias.name and alias.name != "*":
+                        dotted.add(f"{node.module}.{alias.name}")
     return tops, dotted
+
+
+def spec_excluded(spec_text):
+    """Names listed in a spec's excludedimports block."""
+    m = re.search(r"excludedimports\s*=\s*\[(.*?)\]", spec_text, re.S)
+    if not m:
+        return set()
+    return set(re.findall(r"['\"]([^'\"]+)['\"]", m.group(1)))
+
+
+def importable(name):
+    """Return whether a dotted module path resolves in this build."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec(name) is not None
+    except Exception:
+        return False
 
 
 def cython_compat_fix(path):
@@ -362,12 +392,8 @@ def main():
     log("entries: " + ", ".join(entries))
 
     # ---- transitive local module discovery ----------------------------
-    compiled = {}           # rel Path -> dotted module name (entries included)
-    runtime_imports = set()  # full dotted paths of ALL non-local imports
-                             # (stdlib AND third-party): PyInstaller only
-                             # analyzes the vxrun<N>.py launcher stubs, so it
-                             # can never see imports that live inside the
-                             # compiled .pyd bodies.
+    compiled = {}        # rel Path -> dotted module name (entries included)
+    third_party = set()  # top-level third-party import names
 
     def is_local_root_mod(name):
         return (ROOT / f"{name}.py").is_file()
@@ -377,6 +403,7 @@ def main():
 
     queue = [ROOT / e for e in entries]
     seen = set()
+    dotted_all = set()
     while queue:
         py = queue.pop(0).resolve()
         if py in seen or not py.is_file():
@@ -386,6 +413,7 @@ def main():
         seen.add(py)
         rel = py.relative_to(ROOT)
         tops, dotted = parse_imports(py)
+        dotted_all |= dotted
         for t in tops:
             if t in STDLIB:
                 continue
@@ -393,23 +421,8 @@ def main():
                 queue.append(ROOT / f"{t}.py")
             elif is_local_pkg(t):
                 queue.extend(sorted((ROOT / t).rglob("*.py")))
-        # hiddenimports must cover every import that lives only inside the
-        # compiled sources - STDLIB INCLUDED. Skipping stdlib here shipped
-        # EXEs that died at startup with "No module named 'json'".
-        for d in dotted:
-            head = d.split(".")[0]
-            if is_local_root_mod(head) or is_local_pkg(head):
-                continue  # shipped as a compiled hiddenimport already
-            if d in runtime_imports:
-                continue
-            try:
-                found = importlib.util.find_spec(d) is not None
-            except Exception:
-                found = False
-            if not found:
-                log(f"hiddenimports: '{d}' not importable here - skipped")
-                continue
-            runtime_imports.add(d)
+            else:
+                third_party.add(t)
         if rel not in compiled:
             compiled[rel] = ".".join(rel.with_suffix("").parts)
 
@@ -418,13 +431,30 @@ def main():
     log(f"modules to compile: {len(compiled)}")
     for rel, mod in sorted(compiled.items()):
         log(f"  {str(rel):60} -> {mod}")
-    log(f"hiddenimports to inject: {sorted(runtime_imports)}")
+    log(f"third-party hiddenimports to inject: {sorted(third_party)}")
+
+    excluded_all = set()
+    for spec in specs:
+        excluded_all |= spec_excluded(spec.read_text(encoding="utf-8"))
+    excluded_tops = {x.split(".")[0] for x in excluded_all}
+    local_tops = {m.split(".")[0] for m in compiled.values()}
+    verified = sorted(
+        d for d in dotted_all
+        if d
+        and d not in compiled.values()
+        and d.split(".")[0] not in local_tops
+        and d.split(".")[0] not in excluded_tops
+        and importable(d)
+    )
+    log(f"verified module paths to bundle + pre-import ({len(verified)}):")
+    for d in verified:
+        log(f"  + {d}")
 
     # ---- entry launcher mapping ----------------------------------------
     entry_plan = {e: f"vxrun{i}.py" for i, e in enumerate(entries, 1)}
 
     # ---- compute spec rewrites (validated in both modes) ---------------
-    add_hidden = sorted(runtime_imports) + sorted(compiled.values())
+    add_hidden = sorted(set(third_party) | set(verified) | set(compiled.values()))
     spec_patches = {}
     # no Python source ships in any EXE: drop datas lines for every root .py
     names_to_unship = {p.with_suffix("").name for p in ROOT.glob("*.py")} \
@@ -468,10 +498,16 @@ def main():
         log(f"entry {e}: {n} __main__ guard(s) -> runs on import")
 
     # ---- write launcher stubs ------------------------------------------
+    if verified:
+        preimports = "\n" + "\n".join(f'    "{d}",' for d in verified) + "\n"
+    else:
+        preimports = ""
     for e, launcher in entry_plan.items():
         mod = Path(e).stem  # entries are discovered from the repo root
-        (ROOT / launcher).write_text(LAUNCHER_TMPL.format(module=mod), encoding="utf-8")
-        log(f"launcher {launcher} -> import {mod}")
+        (ROOT / launcher).write_text(
+            LAUNCHER_TMPL.format(module=mod, preimports=preimports),
+            encoding="utf-8")
+        log(f"launcher {launcher} -> import {mod} (+{len(verified)} guarded pre-imports)")
 
     # ---- neutralize setuptools config that breaks cythonize ------------
     # (pyproject.toml with tool.setuptools.packages that matches nothing
