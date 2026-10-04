@@ -139,8 +139,8 @@ EMBEDDED_LOGO_B64 = open(os.path.join(os.path.dirname(os.path.abspath(__file__))
 EMBEDDED_ICON_B64 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "embedded_icon_b64.txt"), "r").read().strip() if not getattr(sys, "frozen", False) else open(os.path.join(getattr(sys, "_MEIPASS", "."), "assets", "embedded_icon_b64.txt"), "r").read().strip()
 
 NAVY_DARK  = "#05060f"
-RED        = "#f0541c"
-RED_DARK   = "#c01820"
+RED        = "#e83030"
+RED_DARK   = "#c82020"
 LIGHT      = "#f6f7fb"
 WHITE      = "#ffffff"
 COLOR_BG   = "#f6f7fb"
@@ -598,12 +598,12 @@ def build_html_email(district, to_address="", sender_cfg=None):
             dm_name = raw.split()[0]
 
     email_row = (
-        f'<tr><td style="color:#f0541c;font-weight:700;padding-right:6px;font-family:Calibri;">E:</td>'
+        f'<tr><td style="color:#e83030;font-weight:700;padding-right:6px;font-family:Calibri;">E:</td>'
         f'<td style="font-family:Calibri;"><a href="mailto:{sender_email}" '
         f'style="color:#090d26;text-decoration:none;">{sender_email}</a></td></tr>'
     ) if sender_email else ""
     mobile_row = (
-        f'<tr><td style="color:#f0541c;font-weight:700;padding-right:6px;font-family:Calibri;">M:</td>'
+        f'<tr><td style="color:#e83030;font-weight:700;padding-right:6px;font-family:Calibri;">M:</td>'
         f'<td style="color:#090d26;font-family:Calibri;">{sender_mobile}</td></tr>'
     ) if sender_mobile else ""
 
@@ -614,12 +614,12 @@ def build_html_email(district, to_address="", sender_cfg=None):
 <p>This report includes all devices with <strong>20+ days</strong> age in company. Kindly review and take necessary action on aging inventory.</p>
 <p>Thank you,</p>
 <br>
-<table style="border-top:2px solid #f0541c;padding-top:12px;">
+<table style="border-top:2px solid #e83030;padding-top:12px;">
   <tr>
     <td style="padding-right:16px;vertical-align:top;">
       <img src="cid:gfhlogo" width="170" alt="GFH Telecom">
     </td>
-    <td style="border-left:2px solid #f0541c;padding-left:16px;vertical-align:top;font-family:Calibri,Arial,sans-serif;">
+    <td style="border-left:2px solid #e83030;padding-left:16px;vertical-align:top;font-family:Calibri,Arial,sans-serif;">
       <div style="font-size:16px;font-weight:700;color:#090d26;">{sender_name}</div>
       <div style="font-size:11px;color:#666;margin-top:2px;">{sender_title}</div>
       <table style="margin-top:8px;font-size:12px;border-collapse:collapse;">
@@ -1243,7 +1243,7 @@ class SettingsDialog(tk.Toplevel):
             row.destroy()
             self._dist_rows.remove(entry_tuple)
 
-        tk.Button(row, text="✕", command=remove, bg=LIGHT, fg="#f0541c",
+        tk.Button(row, text="✕", command=remove, bg=LIGHT, fg="#e83030",
                   font=("Calibri", 9, "bold"), bd=0, cursor="hand2").pack(side="left")
 
         self._dist_rows.append(entry_tuple)

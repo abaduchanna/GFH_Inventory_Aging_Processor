@@ -19,7 +19,7 @@ class ThemeManager:
 
 
     BRAND_NAVY = "#090d26"
-    BRAND_RED = "#f0541c"
+    BRAND_RED = "#e83030"
     BRAND_WHITE = "#ffffff"
 
     THEMES = {
@@ -32,7 +32,7 @@ class ThemeManager:
             "input": "#ffffff",
             "border": "#d5d9e5",
             "navy": "#090d26",
-            "red": "#f0541c",
+            "red": "#e83030",
             "log_bg": "#ffffff",
             "log_fg": "#16213a",
         },
@@ -45,7 +45,7 @@ class ThemeManager:
             "input": "#1c2447",
             "border": "#2b3561",
             "navy": "#090d26",
-            "red": "#f0541c",
+            "red": "#e83030",
             "log_bg": "#05070f",
             "log_fg": "#cbd5e1",
         }
@@ -164,11 +164,11 @@ class ThemeManager:
                 elif wtype == "Text":
                     child.configure(bg=panel, fg=text_fg,
                                     insertbackground=text_fg,
-                                    selectbackground=colors.get("red", "#f0541c"),
+                                    selectbackground=colors.get("red", "#e83030"),
                                     selectforeground="#ffffff")
                 elif wtype == "Listbox":
                     child.configure(bg=input_bg, fg=text_fg,
-                                    selectbackground=colors.get("red", "#f0541c"),
+                                    selectbackground=colors.get("red", "#e83030"),
                                     selectforeground="#ffffff")
                 elif wtype in ("Canvas", "canvas"):
                     child.configure(bg=bg, highlightbackground=colors.get("border", bg))
@@ -187,7 +187,7 @@ class ThemeManager:
                 elif wtype == "Scale":
                     child.configure(bg=bg, fg=text_fg,
                                     troughcolor=panel_alt,
-                                    activebackground=colors.get("red", "#f0541c"))
+                                    activebackground=colors.get("red", "#e83030"))
                 elif wtype == "Spinbox":
                     child.configure(bg=input_bg, fg=text_fg,
                                     insertbackground=text_fg,
@@ -200,7 +200,7 @@ class ThemeManager:
                     child.configure(bg=bg, fg=text_fg)
                 elif wtype == "Scrollbar":
                     child.configure(bg=panel_alt, troughcolor=bg,
-                                    activebackground=colors.get("red", "#f0541c"))
+                                    activebackground=colors.get("red", "#e83030"))
             except tk.TclError:
                 pass
 
