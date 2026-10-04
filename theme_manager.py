@@ -33,8 +33,8 @@ class ThemeManager:
             "border": "#d5d9e5",
             "navy": "#090d26",
             "red": "#f0541c",
-            "log_bg": "#0f1830",
-            "log_fg": "#e2e8f0",
+            "log_bg": "#ffffff",
+            "log_fg": "#16213a",
         },
         "dark": {
             "bg": "#0b1020",
