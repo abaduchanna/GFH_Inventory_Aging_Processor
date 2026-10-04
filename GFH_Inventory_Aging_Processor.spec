@@ -14,10 +14,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
-        ('branding_runtime.py', '.'),
-        ('3sverse_website_favicon.ico', '.'),
-        ('brand_bg_ring.png', '.'),
-        ('brand_bg_orb.png', '.'),
+        ('native_titlebar.py', '.'),
         ('assets', 'assets'),
         ('GFH_Telecom_Logo.png', '.'),
         ('theme_manager.py', '.'),

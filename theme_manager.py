@@ -115,14 +115,11 @@ class ThemeManager:
         window.configure(background=colors["bg"])
         self._walk(window, colors)
 
-        # Shared 3S Verse native chrome + exact WiFi Transfer background.
+        # Keep Windows native chrome synchronized without changing this
+        # partner app's own logo, icon, header, or background artwork.
         try:
-            from branding_runtime import install_branding
-            install_branding(
-                window,
-                dark=(self.current_theme == "dark"),
-                background=colors.get("bg"),
-            )
+            from native_titlebar import sync_titlebar
+            sync_titlebar(window, dark=(self.current_theme == "dark"))
         except Exception:
             pass
 
