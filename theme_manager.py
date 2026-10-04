@@ -115,6 +115,17 @@ class ThemeManager:
         window.configure(background=colors["bg"])
         self._walk(window, colors)
 
+        # Shared 3S Verse native chrome + exact WiFi Transfer background.
+        try:
+            from branding_runtime import install_branding
+            install_branding(
+                window,
+                dark=(self.current_theme == "dark"),
+                background=colors.get("bg"),
+            )
+        except Exception:
+            pass
+
     def _walk(self, widget, colors):
         """Walk widget tree and apply colors, skipping protected widgets."""
         import tkinter as tk
