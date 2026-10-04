@@ -99,6 +99,7 @@ class ThemeManager:
         style.configure("TLabel", background=colors["bg"], foreground=colors["text"], font=("Segoe UI", 9))
         style.configure("TCombobox", fieldbackground=colors.get("input", "#ffffff"), background=colors.get("panel_alt", "#eef0f6"), foreground=colors.get("text", "#16213a"))
         style.configure("TButton", background=colors["panel_alt"], foreground=colors["text"], font=("Segoe UI", 9))
+        style.map("TButton", background=[("active", self.BRAND_RED)], foreground=[("active", self.BRAND_WHITE)])
         style.configure("TEntry", fieldbackground=colors["input"], foreground=colors["text"])
         style.configure("TNotebook", background=colors["bg"])
         style.configure("TNotebook.Tab", background=colors["panel_alt"], foreground=colors["text"], font=("Segoe UI", 9))
@@ -114,6 +115,8 @@ class ThemeManager:
 
         window.configure(background=colors["bg"])
         self._walk(window, colors)
+        from partner_theme_runtime import enforce_brand_interactions
+        enforce_brand_interactions(window, self.BRAND_NAVY, self.BRAND_RED)
 
         # Keep Windows native chrome synchronized without changing this
         # partner app's own logo, icon, header, or background artwork.
