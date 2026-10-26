@@ -1406,7 +1406,7 @@ class App:
         # center it (DPI-aware), then stay a normal resizable top-level so
         # Windows Snap (50% left/right, corners, Win+arrow) keeps working.
         self._apply_dynamic_geometry()
-        self.root.after(10, lambda: self.root.state("zoomed"))
+        self.root.state("zoomed")  # immediate maximize — no delayed jump
         root.configure(bg=LIGHT)
         _set_window_icon(root)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
@@ -1416,29 +1416,42 @@ class App:
         self._poll()
 
     def _apply_dynamic_geometry(self) -> None:
-        """Size the window to 90% of the screen and center it.
+        """Fill the entire work area (screen minus taskbar) BEFORE the window
+        is ever mapped, so the very first paint already looks maximized — the
+        old 90%-centered geometry plus a delayed state('zoomed') made the exe
+        visibly open centered and then jump to full screen.
 
-        Works on any laptop/monitor/PC (1080p, 1440p, 2K, 4K) and respects
-        Windows DPI scaling (run after _enable_dpi_awareness()). The window
-        stays resizable so Windows Snap gestures keep working — it centers
-        on launch, then snaps normally to 50% left/right, corners or via
-        Win+arrow shortcuts.
-        """
+        Windows: the real work area is read via SystemParametersInfoW so the
+        taskbar is respected on any monitor/DPI. Other platforms fall back to
+        the full screen size. The window stays resizable so Windows Snap keeps
+        working, and state('zoomed') is still applied for a true maximize."""
         try:
             root = self.root
             root.update_idletasks()
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-            w = max(640, min(int(sw * 0.90), sw - 20))
-            h = max(480, min(int(sh * 0.90), sh - 40))
-            x = max(0, (sw - w) // 2)
-            y = max(0, (sh - h) // 2)
-            root.geometry(f"{w}x{h}+{x}+{y}")
-            root.minsize(min(660, max(560, sw // 2)),
-                         min(540, max(420, sh // 2)))
+            w, h, x, y = sw, sh, 0, 0
+            try:
+                import ctypes
+
+                class _WORKAREA_RECT(ctypes.Structure):
+                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+                _rect = _WORKAREA_RECT()
+                # 0x0030 = SPI_GETWORKAREA
+                if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(_rect), 0):
+                    w = _rect.right - _rect.left
+                    h = _rect.bottom - _rect.top
+                    x = _rect.left
+                    y = _rect.top
+            except Exception:
+                h = max(0, sh - 48)  # taskbar fallback if the Win32 call fails
+            root.geometry(f"{max(640, min(w, sw))}x{max(480, min(h, sh))}+{max(0, x)}+{max(0, y)}")
+            root.minsize(min(1220, max(560, sw // 2)),
+                         min(740, max(420, sh // 2)))
             root.resizable(True, True)
         except Exception:
             pass
-
 
     def _styles(self):
         s = ttk.Style(); s.theme_use("clam")
