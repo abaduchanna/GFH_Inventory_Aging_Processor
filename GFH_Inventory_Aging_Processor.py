@@ -1392,6 +1392,26 @@ class ExclusionsDialog(tk.Toplevel):
         self.destroy()
 
 
+def _force_maximized(window):
+    """Always open the window MAXIMIZED (user request) and KEEP it maximized
+    while the window maps. Tk silently drops the zoomed state when it is set
+    while the window is still being mapped — the zoomed state is therefore
+    re-asserted several times across the first second."""
+    def _zoom():
+        try:
+            window.state("zoomed")
+        except Exception:
+            try:
+                window.attributes("-zoomed", True)
+            except Exception:
+                pass
+    for _delay in (10, 80, 250, 600):
+        try:
+            window.after(_delay, _zoom)
+        except Exception:
+            pass
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -1406,7 +1426,7 @@ class App:
         # center it (DPI-aware), then stay a normal resizable top-level so
         # Windows Snap (50% left/right, corners, Win+arrow) keeps working.
         self._apply_dynamic_geometry()
-        self.root.state("zoomed")  # immediate maximize — no delayed jump
+        _force_maximized(self.root)  # immediate zoom + re-asserts while Tk maps
         root.configure(bg=LIGHT)
         _set_window_icon(root)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
