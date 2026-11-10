@@ -28,8 +28,18 @@ EXCLUSIONS PANEL:
     pipelines at cleaning time. Everything is editable in the app and saved
     to gfh_aging_exclusions.json next to the app.
 
+SECOND TAB - "WhatsApp - Aged Devices" (independent of the above):
+    Pick a raw aging export, tick which districts to send and type each
+    one's WhatsApp Desktop group name by hand, set an Aged (days) or more
+    cutoff, optionally exclude stores (separate list from the panel above -
+    this tab only). Save Mapping / Send to WhatsApp Desktop then renders one
+    GFH-branded table screenshot per ticked district (DISTRICT, STORE,
+    PRODUCT, IMEI, AGE IN COMPANY, PO RECEIVING DATE) and pastes + sends it
+    into that WhatsApp Desktop group. Everything persists to
+    gfh_aging_whatsapp_config.json next to the app. Requires pywinauto.
+
 Install once:
-    pip install pandas openpyxl gspread gspread-formatting pywin32 tkinterdnd2 pillow
+    pip install pandas openpyxl gspread gspread-formatting pywin32 tkinterdnd2 pillow pywinauto
 
 Developed by www.3SVerse.com | Copyright © {date.today().year} | All rights reserved.
 """
@@ -86,6 +96,11 @@ try:
     from PIL import Image as _PI, ImageTk as _PIT
 except ImportError:
     _HAS_PIL = False
+try:
+    import pywinauto as _pywinauto_probe  # noqa: F401
+    _HAS_PYWINAUTO_PROBE = True
+except ImportError:
+    _HAS_PYWINAUTO_PROBE = False
 
 # Import openpyxl Border/Side with aliases to avoid conflict with gspread_formatting's Border
 from openpyxl.styles import Font, PatternFill, Alignment, Border as XlBorder, Side as XlSide
@@ -397,6 +412,368 @@ def log_exclusions_summary(log=print):
     n_b = len([x for x in exc.get("blocked_imeis", []) if normalize_imei(x)])
     log(f"Exclusions: {n_s} store(s) + {n_i} IMEI(s) hidden from Sheet/emails; "
         f"{n_b} always-blocked IMEI(s) removed at cleaning.")
+
+
+# ==========================================================
+# WHATSAPP — AGED DEVICES (second tab)
+# ==========================================================
+# Independent of the Email/Google Sheets pipeline above: lets the user pick
+# an aging export, map each District to a WhatsApp Desktop group (typed in
+# by hand — no fixed list), tick which districts to send, and push one
+# GFH-branded table image per ticked district straight into that group's
+# chat via WhatsApp Desktop (not WhatsApp Web).
+WHATSAPP_CONFIG_FILE = "gfh_aging_whatsapp_config.json"
+
+WA_SRC_COLUMNS = {
+    "district": ["District"],
+    "store": ["Store"],
+    "product": ["Product Desc Short", "Product Desc Full"],
+    "imei": ["Serial 1"],
+    "age_in_company": ["Age in Company"],
+    "po_date": ["PO Received Date"],
+}
+WA_TABLE_COLUMNS = [
+    ("DISTRICT", "district", 150),
+    ("STORE", "store", 230),
+    ("PRODUCT", "product", 300),
+    ("IMEI", "imei", 190),
+    ("AGE IN COMPANY", "age_in_company", 150),
+    ("PO RECEIVING DATE", "po_date", 170),
+]
+
+try:
+    import pywinauto  # noqa: F401
+    from pywinauto import Desktop
+    _HAS_PYWINAUTO = True
+except ImportError:
+    _HAS_PYWINAUTO = False
+
+
+def _wa_norm_header(h):
+    return re.sub(r"\s+", " ", str(h or "")).strip().casefold()
+
+
+def wa_read_aging_rows(path):
+    """Read a raw Inventory Aging export for the WhatsApp tab. Independent of
+    the pandas-based Email/Sheets pipeline above — this tab works on the file
+    exactly as exported, no cleaning/merging applied, so the user sees (and
+    sends) literally what is in the source file."""
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    ws = wb.worksheets[0]
+    rows_iter = ws.iter_rows(values_only=True)
+    header = next(rows_iter, None)
+    if header is None:
+        wb.close()
+        raise ValueError("File appears to be empty.")
+    hmap = {_wa_norm_header(h): i for i, h in enumerate(header)}
+    col_idx = {}
+    for key, candidates in WA_SRC_COLUMNS.items():
+        idx = None
+        for c in candidates:
+            if _wa_norm_header(c) in hmap:
+                idx = hmap[_wa_norm_header(c)]
+                break
+        col_idx[key] = idx
+    missing = [k for k, v in col_idx.items() if v is None]
+    if missing:
+        raise ValueError(
+            "This file is missing expected column(s): " + ", ".join(missing)
+            + "\n\nExpected (any of): " + "; ".join(
+                f"{k} = {' / '.join(v)}" for k, v in WA_SRC_COLUMNS.items())
+        )
+
+    out = []
+    for row in rows_iter:
+        if row is None or all(v is None for v in row):
+            continue
+
+        def get(key):
+            i = col_idx[key]
+            return row[i] if i is not None and i < len(row) else None
+
+        district = get("district")
+        if district is None or str(district).strip() == "":
+            continue
+        age = get("age_in_company")
+        try:
+            age = int(age) if age is not None and str(age).strip() != "" else None
+        except Exception:
+            age = None
+        po = get("po_date")
+        if isinstance(po, (datetime, date)):
+            po_str = po.strftime("%m/%d/%Y")
+        else:
+            po_str = str(po).strip() if po not in (None, "") else ""
+        out.append({
+            "district": str(district).strip(),
+            "store": str(get("store") or "").strip(),
+            "product": str(get("product") or "").strip(),
+            "imei": str(get("imei") or "").strip(),
+            "age_in_company": age,
+            "po_date": po_str,
+        })
+    wb.close()
+    return out
+
+
+def wa_unique_districts(rows):
+    seen, out = set(), []
+    for r in rows:
+        d = r["district"]
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return sorted(out, key=str.casefold)
+
+
+def wa_filter_rows(rows, district, aged_days, excluded_stores=None):
+    """Devices in `district` aged `aged_days` or more (blank/unknown age
+    excluded), minus any store matching an entry in `excluded_stores`
+    (same case-insensitive contains-match as the main Exclusions panel,
+    via store_matches_pattern)."""
+    pats = [s for s in (excluded_stores or []) if s and s.strip()]
+    out = []
+    for r in rows:
+        if r["district"] != district:
+            continue
+        if r["age_in_company"] is None or r["age_in_company"] < aged_days:
+            continue
+        if pats and any(store_matches_pattern(r["store"], p) for p in pats):
+            continue
+        out.append(r)
+    return out
+
+
+def wa_render_table_image(district, rows, logo_path=None, group_label=None):
+    """GFH-branded screenshot: navy top bar + logo, dark-navy column header
+    row (matches every other GFH/VDS app's header styling), alternating rows."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    navy = (9, 13, 38)
+    red = (232, 48, 48)
+    white = (255, 255, 255)
+    row_alt = (238, 242, 248)
+    text_c = (22, 33, 58)
+    border_c = (200, 210, 224)
+
+    def font(size, bold=False):
+        for c in (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/calibrib.ttf" if bold else "C:/Windows/Fonts/calibri.ttf",
+        ):
+            try:
+                if os.path.exists(c):
+                    return ImageFont.truetype(c, size)
+            except Exception:
+                pass
+        return ImageFont.load_default()
+
+    pad = 14
+    row_h = 30
+    brand_bar_h = 90   # matches FixedHeaderManager's standard GFH header height
+    col_header_h = 36
+    width = max(
+        sum(c[2] for c in WA_TABLE_COLUMNS) + pad * 2,
+        560,  # keeps the centered title legible even for a 1-2 column table
+    )
+    height = brand_bar_h + col_header_h + max(1, len(rows)) * row_h + pad
+
+    img = Image.new("RGB", (width, height), white)
+    d = ImageDraw.Draw(img)
+
+    # Standard GFH header bar: logo + red divider on the left, title
+    # CENTERED across the full bar \u2014 identical layout to every other
+    # GFH/VDS app window (FixedHeaderManager: logo | divider | centered title).
+    d.rectangle([0, 0, width, brand_bar_h], fill=navy)
+    logo_right_edge = pad
+    if logo_path and os.path.exists(logo_path):
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+            logo.thumbnail((150, 56))
+            img.paste(logo, (pad, (brand_bar_h - logo.height) // 2), logo)
+            logo_right_edge = pad + logo.width
+        except Exception:
+            pass
+    divider_x = logo_right_edge + 14
+    d.rectangle([divider_x, 14, divider_x + 3, brand_bar_h - 14], fill=red)
+
+    title = f"Aged Devices \u2014 {district}"
+    if group_label:
+        title += f"  ({group_label})"
+    d.text((width / 2, brand_bar_h / 2), title, font=font(16, True),
+           fill=white, anchor="mm")
+
+    y = brand_bar_h
+    d.rectangle([0, y, width, y + col_header_h], fill=navy)
+    x = pad
+    f_head = font(11, True)
+    for label, _key, w in WA_TABLE_COLUMNS:
+        d.text((x + 6, y + col_header_h // 2), label, font=f_head, fill=white, anchor="lm")
+        x += w
+
+    y += col_header_h
+    f_row = font(11)
+    if not rows:
+        d.text((pad + 6, y + row_h // 2), "No devices at/above this age threshold.",
+                font=f_row, fill=text_c, anchor="lm")
+    for i, r in enumerate(rows):
+        if i % 2 == 1:
+            d.rectangle([0, y, width, y + row_h], fill=row_alt)
+        x = pad
+        for _label, key, w in WA_TABLE_COLUMNS:
+            val = r.get(key, "")
+            val = "" if val is None else str(val)
+            d.text((x + 6, y + row_h // 2), val, font=f_row, fill=text_c, anchor="lm")
+            x += w
+        d.line([0, y + row_h, width, y + row_h], fill=border_c, width=1)
+        y += row_h
+
+    return img
+
+
+def load_whatsapp_config():
+    path = os.path.join(get_app_dir(), WHATSAPP_CONFIG_FILE)
+    cfg = {"aged_days": 30, "last_file": "", "districts": {}, "excluded_stores": []}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            cfg["aged_days"] = int(saved.get("aged_days", 30))
+            cfg["last_file"] = saved.get("last_file", "") or ""
+            d = saved.get("districts", {})
+            if isinstance(d, dict):
+                for k, v in d.items():
+                    if not isinstance(v, dict):
+                        continue
+                    cfg["districts"][str(k)] = {
+                        "checked": bool(v.get("checked", False)),
+                        "group": str(v.get("group", "") or ""),
+                    }
+            ex = saved.get("excluded_stores", [])
+            if isinstance(ex, list):
+                cfg["excluded_stores"] = [str(s).strip() for s in ex if str(s).strip()]
+        except Exception:
+            pass
+    return cfg
+
+
+def save_whatsapp_config(cfg):
+    path = os.path.join(get_app_dir(), WHATSAPP_CONFIG_FILE)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+
+def wa_copy_image_to_clipboard(img):
+    """Put a PIL Image on the Windows clipboard as a CF_DIB bitmap, exactly
+    like Ctrl+C on an image — WhatsApp Desktop's message box accepts Ctrl+V
+    of this the same way it accepts a copied screenshot."""
+    import io as _io
+    import win32clipboard  # part of pywin32, already a required dependency
+
+    buf = _io.BytesIO()
+    img.convert("RGB").save(buf, "BMP")
+    data = buf.getvalue()[14:]  # strip the 14-byte BITMAPFILEHEADER; CF_DIB wants the rest
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20):
+    """Best-effort WhatsApp Desktop (Win32 app, not WhatsApp Web) automation:
+    focus the app, open the named chat via its search box, paste the image
+    and send. Every step is logged and wrapped so a failure anywhere still
+    leaves the image sitting in the compose box (and on the clipboard) for
+    the user to finish by hand with one Enter — it never silently does
+    nothing.
+
+    Returns (ok: bool, message: str).
+    """
+    if not _HAS_PYWINAUTO:
+        return False, ("pywinauto not installed — run: pip install pywinauto"
+                        " (image copied to clipboard; open WhatsApp Desktop,"
+                        " the chat, and press Ctrl+V yourself).")
+    try:
+        wa_copy_image_to_clipboard(img)
+    except Exception as e:
+        return False, f"Could not copy image to clipboard: {e}"
+
+    import time as _time
+
+    try:
+        desktop = Desktop(backend="uia")
+        win = None
+        for _ in range(int(timeout * 2)):
+            try:
+                win = desktop.window(title_re=".*WhatsApp.*", top_level_only=True)
+                if win.exists():
+                    break
+            except Exception:
+                pass
+            win = None
+            _time.sleep(0.5)
+        if win is None or not win.exists():
+            return False, ("WhatsApp Desktop window not found. Is it open and"
+                            " signed in? (Image is on the clipboard — you can"
+                            " paste it yourself with Ctrl+V.)")
+        win.set_focus()
+        _time.sleep(0.3)
+    except Exception as e:
+        return False, f"Could not focus WhatsApp Desktop: {e}"
+
+    # Open the chat: click the search icon/box, type the group name, Enter.
+    try:
+        search = None
+        for title in ("Search", "Search or start new chat"):
+            try:
+                cand = win.child_window(title_re=f".*{re.escape(title)}.*", control_type="Edit")
+                if cand.exists():
+                    search = cand
+                    break
+            except Exception:
+                continue
+        if search is None:
+            edits = win.descendants(control_type="Edit")
+            search = edits[0] if edits else None
+        if search is None:
+            return False, "Could not find the WhatsApp search box (UI may have changed)."
+        search.click_input()
+        _time.sleep(0.2)
+        search.type_keys("^a")
+        search.type_keys(group_name, with_spaces=True, pause=0.02)
+        _time.sleep(0.8)
+        search.type_keys("{ENTER}")
+        _time.sleep(0.8)
+    except Exception as e:
+        return False, f"Could not search/open group '{group_name}': {e}"
+
+    # Paste into the compose box and send.
+    try:
+        edits = win.descendants(control_type="Edit")
+        compose = None
+        for e in reversed(edits):  # compose box is the last Edit control, bottom of window
+            try:
+                if e.is_visible() and e.is_enabled():
+                    compose = e
+                    break
+            except Exception:
+                continue
+        if compose is None:
+            return False, ("Opened the group but could not find the message box."
+                            " Image is on the clipboard — paste with Ctrl+V and press Enter.")
+        compose.click_input()
+        _time.sleep(0.2)
+        compose.type_keys("^v")
+        _time.sleep(1.2)  # let WhatsApp render the image-attach preview
+        compose.type_keys("{ENTER}")
+        return True, f"Sent to '{group_name}'."
+    except Exception as e:
+        return False, (f"Pasted search but could not send into '{group_name}': {e}"
+                        " (image is on the clipboard — paste with Ctrl+V and press Enter).")
 
 
 # ==========================================================
@@ -1431,9 +1808,30 @@ class App:
         _set_window_icon(root)
         root.protocol("WM_DELETE_WINDOW", root.destroy)
         self.theme_manager = ThemeManager("GFH Inventory Aging Processor", app_name="gfh-inventory-aging-processor")
-        self._styles(); self._header(); self._body(); self._copyright_bar()
+        self._styles(); self._header(); self._tabs(); self._copyright_bar()
         apply_theme_to_window(self.root, self.theme_manager)
         self._poll()
+
+    def _tabs(self):
+        """Email/Google-Sheets pipeline (tab 1, unchanged) + WhatsApp — Aged
+        Devices (tab 2, new): two independent tools in one app."""
+        nb = ttk.Style()
+        nb.configure("GFH.TNotebook", background=LIGHT, borderwidth=0)
+        nb.configure("GFH.TNotebook.Tab", font=("Calibri", 10, "bold"),
+                     padding=(16, 9), background="#dfe6f2", foreground=NAVY)
+        nb.map("GFH.TNotebook.Tab",
+               background=[("selected", NAVY)], foreground=[("selected", WHITE)])
+
+        self.notebook = ttk.Notebook(self.root, style="GFH.TNotebook")
+        self.notebook.pack(fill="both", expand=True)
+
+        tab1 = tk.Frame(self.notebook, bg=LIGHT)
+        tab2 = tk.Frame(self.notebook, bg=LIGHT)
+        self.notebook.add(tab1, text="Email / Google Sheets")
+        self.notebook.add(tab2, text="WhatsApp — Aged Devices")
+
+        self._body(tab1)
+        self._whatsapp_tab(tab2)
 
     def _apply_dynamic_geometry(self) -> None:
         """Fill the entire work area (screen minus taskbar) BEFORE the window
@@ -1535,8 +1933,8 @@ class App:
             self.root.configure(bg=colors.get("bg", "#f6f7fb"))
         except Exception:
             pass
-    def _body(self):
-        body = tk.Frame(self.root, bg=LIGHT)
+    def _body(self, parent):
+        body = tk.Frame(parent, bg=LIGHT)
         body.pack(fill="both", expand=True, padx=24, pady=18)
 
         # Drop zone
@@ -1617,6 +2015,278 @@ class App:
     def _open_exclusions(self):
         ExclusionsDialog(self.root)
 
+    # ------------------------------------------------------------------
+    # TAB 2: WhatsApp — Aged Devices
+    # ------------------------------------------------------------------
+    def _whatsapp_tab(self, parent):
+        """Pick a raw aging export, map District -> WhatsApp group by hand,
+        tick which districts to send, type the aged-days cutoff, and push
+        one GFH-branded table image per ticked district into WhatsApp
+        Desktop. Everything (mapping, checks, aged-days, excluded stores)
+        persists to gfh_aging_whatsapp_config.json for next time."""
+        self.wa_file_path = tk.StringVar()
+        self.wa_cfg = load_whatsapp_config()
+        self.wa_rows = []
+        self.wa_districts = []
+        self.wa_row_widgets = {}  # district -> (BooleanVar checked, StringVar group)
+        self._wa_running = False
+        self._wa_q = queue.Queue()
+
+        body = tk.Frame(parent, bg=LIGHT)
+        body.pack(fill="both", expand=True, padx=24, pady=18)
+
+        # File row
+        frow = tk.Frame(body, bg=LIGHT); frow.pack(fill="x", pady=(0, 10))
+        frow.columnconfigure(0, weight=1)
+        tk.Entry(frow, textvariable=self.wa_file_path, state="readonly",
+                 font=("Calibri", 9), relief="flat", bg="#e8eff8", fg=NAVY,
+                 readonlybackground="#e8eff8",
+                 highlightbackground="#b0c4de", highlightthickness=1
+                 ).grid(row=0, column=0, sticky="ew", ipady=5, padx=(0, 8))
+        ttk.Button(frow, text="Browse", style="Browse.TButton",
+                   command=self._wa_browse).grid(row=0, column=1, padx=(0, 8))
+        self.wa_load_btn = ttk.Button(frow, text="Load Districts", style="Run.TButton",
+                                       command=self._wa_load)
+        self.wa_load_btn.grid(row=0, column=2)
+
+        # Aged-days + store-exclusions row
+        opt = tk.Frame(body, bg=LIGHT); opt.pack(fill="x", pady=(0, 10))
+        tk.Label(opt, text="Aged (days) or more:", bg=LIGHT, fg=NAVY,
+                 font=("Calibri", 10, "bold")).pack(side="left")
+        self.wa_aged_var = tk.IntVar(value=int(self.wa_cfg.get("aged_days", 30)))
+        tk.Spinbox(opt, from_=0, to=9999, width=6, textvariable=self.wa_aged_var,
+                   font=("Calibri", 10), justify="center"
+                   ).pack(side="left", padx=(8, 20))
+        ttk.Button(opt, text="Store Exclusions", style="Browse.TButton",
+                   command=self._wa_open_store_exclusions).pack(side="left")
+        tk.Label(opt, text="  Tick a district, type its WhatsApp group name, then Save.",
+                 bg=LIGHT, fg="#666", font=("Calibri", 9)).pack(side="left")
+
+        # Scrollable districts panel
+        tk.Label(body, text="Districts", font=("Calibri", 9, "bold"),
+                 fg=NAVY, bg=LIGHT).pack(anchor="w")
+        panel_outer = tk.Frame(body, bg=WHITE, highlightbackground="#b0c4de",
+                                highlightthickness=1)
+        panel_outer.pack(fill="both", expand=True, pady=(2, 10))
+        canvas = tk.Canvas(panel_outer, bg=WHITE, highlightthickness=0)
+        vbar = ttk.Scrollbar(panel_outer, orient="vertical", command=canvas.yview)
+        self.wa_districts_frame = tk.Frame(canvas, bg=WHITE)
+        self.wa_districts_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self.wa_districts_frame, anchor="nw")
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+        self.wa_canvas = canvas
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # bind only while hovering this panel so it doesn't steal scrolling
+        # from the rest of the app when this tab isn't visible
+        panel_outer.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        panel_outer.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        self.wa_empty_label = tk.Label(
+            self.wa_districts_frame,
+            text="Select a file above and click \"Load Districts\".",
+            bg=WHITE, fg="#888", font=("Calibri", 10), pady=16)
+        self.wa_empty_label.pack(fill="x")
+
+        # Buttons
+        btn_row = tk.Frame(body, bg=LIGHT); btn_row.pack(fill="x", pady=(0, 10))
+        ttk.Button(btn_row, text="Save Mapping", style="Browse.TButton",
+                   command=self._wa_save_mapping).pack(side="left", padx=(0, 8))
+        self.wa_send_btn = ttk.Button(btn_row, text="Send to WhatsApp Desktop",
+                                       style="Run.TButton", command=self._wa_send,
+                                       state="disabled")
+        self.wa_send_btn.pack(side="left", fill="x", expand=True)
+
+        self.wa_progress = ttk.Progressbar(body, mode="indeterminate",
+                                            style="Accent.Horizontal.TProgressbar")
+        self.wa_progress.pack(fill="x", pady=(0, 10))
+
+        tk.Label(body, text="Activity Log", font=("Calibri", 9, "bold"),
+                 fg=NAVY, bg=LIGHT).pack(anchor="w")
+        self.wa_log_box = scrolledtext.ScrolledText(
+            body, height=9, font=("Consolas", 8),
+            bg="#10182e", fg="#a8d8ff", relief="flat", state="disabled", wrap="word")
+        self.wa_log_box.pack(fill="both", expand=True)
+
+        if not _HAS_PYWINAUTO_PROBE:
+            self._wa_log("NOTE: pywinauto not installed — install it to enable "
+                         "one-click sending (pip install pywinauto). The image "
+                         "will still be generated and copied to the clipboard.")
+        n = len(self.wa_cfg.get("excluded_stores", []))
+        if n:
+            self._wa_log(f"{n} store(s) excluded from sends — see Store Exclusions.")
+
+    def _wa_log(self, msg):
+        """Thread-safe: always goes through the queue _poll() drains, even
+        when called from the send worker thread."""
+        self._wa_q.put(msg)
+
+    def _wa_browse(self):
+        p = filedialog.askopenfilename(title="Select Inventory Aging Excel file",
+            filetypes=[("Excel files", "*.xlsx *.xlsm *.xls"), ("All files", "*.*")])
+        if p:
+            self.wa_file_path.set(p)
+            self._wa_log(f"Selected: {Path(p).name}")
+
+    def _wa_load(self):
+        p = self.wa_file_path.get().strip()
+        if not p or not Path(p).exists():
+            self._wa_log("ERROR: Please select a valid Excel file first.")
+            return
+        try:
+            self.wa_rows = wa_read_aging_rows(p)
+        except Exception as e:
+            self._wa_log(f"ERROR: {e}")
+            return
+        self.wa_districts = wa_unique_districts(self.wa_rows)
+        if not self.wa_districts:
+            self._wa_log("No District column values found in this file.")
+            return
+        self.wa_cfg["last_file"] = p
+        self._wa_build_district_rows()
+        self.wa_send_btn.config(state="normal")
+        self._wa_log(f"Loaded {len(self.wa_rows)} rows across {len(self.wa_districts)} "
+                     f"district(s): {', '.join(self.wa_districts)}")
+
+    def _wa_build_district_rows(self):
+        for child in self.wa_districts_frame.winfo_children():
+            child.destroy()
+        self.wa_row_widgets = {}
+        saved = self.wa_cfg.get("districts", {})
+        for i, d in enumerate(self.wa_districts):
+            entry = saved.get(d, {})
+            stripe = WHITE if i % 2 == 0 else "#eef2f8"
+            row = tk.Frame(self.wa_districts_frame, bg=stripe)
+            row.pack(fill="x")
+            chk_var = tk.BooleanVar(value=bool(entry.get("checked", False)))
+            tk.Checkbutton(row, variable=chk_var, bg=stripe, activebackground=stripe
+                           ).pack(side="left", padx=(10, 6), pady=6)
+            tk.Label(row, text=d, bg=stripe, fg=NAVY, font=("Calibri", 10, "bold"),
+                     width=18, anchor="w").pack(side="left", padx=(0, 10))
+            tk.Label(row, text="WhatsApp group:", bg=stripe, fg="#555",
+                     font=("Calibri", 9)).pack(side="left", padx=(0, 6))
+            grp_var = tk.StringVar(value=entry.get("group", ""))
+            tk.Entry(row, textvariable=grp_var, font=("Calibri", 10),
+                     relief="flat", bg="#e8eff8",
+                     highlightbackground="#b0c4de", highlightthickness=1
+                     ).pack(side="left", fill="x", expand=True, padx=(0, 12), ipady=3)
+            self.wa_row_widgets[d] = (chk_var, grp_var)
+
+    def _wa_open_store_exclusions(self):
+        win = tk.Toplevel(self.root)
+        win.title("Store Exclusions (WhatsApp tab)")
+        win.configure(bg=LIGHT)
+        win.geometry("480x420")
+        win.transient(self.root)
+        tk.Label(win, text="Stores listed here are left out of every WhatsApp send "
+                           "(this tab only — the Email/Sheets Exclusions panel is separate).",
+                 bg=LIGHT, fg="#555", font=("Calibri", 9), wraplength=440,
+                 justify="left").pack(anchor="w", padx=10, pady=(10, 4))
+        tk.Label(win, text="One store name per line. Matches case-insensitively; "
+                           "partial names match too (e.g. \"Houston\" matches every "
+                           "store containing that word).",
+                 bg=LIGHT, fg="#888", font=("Calibri", 8), wraplength=440,
+                 justify="left").pack(anchor="w", padx=10, pady=(0, 6))
+        box = scrolledtext.ScrolledText(win, font=("Consolas", 9), bg=WHITE,
+                                        fg=COLOR_TEXT, relief="flat", wrap="word",
+                                        highlightbackground="#b0c4de", highlightthickness=1)
+        box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        box.insert("1.0", "\n".join(self.wa_cfg.get("excluded_stores", [])))
+
+        def _save():
+            lines = [l.strip() for l in box.get("1.0", "end").splitlines()]
+            seen, out = set(), []
+            for l in lines:
+                if not l:
+                    continue
+                key = l.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(l)
+            self.wa_cfg["excluded_stores"] = out
+            save_whatsapp_config(self._wa_collect_config())
+            self._wa_log(f"Store Exclusions saved: {len(out)} store(s) excluded.")
+            win.destroy()
+
+        btns = tk.Frame(win, bg=LIGHT); btns.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Button(btns, text="Save", style="Run.TButton", command=_save
+                   ).pack(side="right", padx=(8, 0))
+        ttk.Button(btns, text="Cancel", style="Browse.TButton", command=win.destroy
+                   ).pack(side="right")
+
+    def _wa_collect_config(self):
+        cfg = {
+            "aged_days": int(self.wa_aged_var.get() or 0),
+            "last_file": self.wa_cfg.get("last_file", ""),
+            "districts": {},
+            "excluded_stores": list(self.wa_cfg.get("excluded_stores", [])),
+        }
+        for d, (chk_var, grp_var) in self.wa_row_widgets.items():
+            cfg["districts"][d] = {"checked": bool(chk_var.get()),
+                                   "group": grp_var.get().strip()}
+        return cfg
+
+    def _wa_save_mapping(self):
+        cfg = self._wa_collect_config()
+        save_whatsapp_config(cfg)
+        self.wa_cfg = cfg
+        self._wa_log("Saved group mapping + aged-days to gfh_aging_whatsapp_config.json.")
+
+    def _wa_send(self):
+        if self._wa_running:
+            return
+        if not self.wa_rows:
+            self._wa_log("ERROR: Load a file first.")
+            return
+        self._wa_save_mapping()
+        targets = [(d, gv.get().strip()) for d, (cv, gv) in self.wa_row_widgets.items()
+                   if cv.get() and gv.get().strip()]
+        if not targets:
+            self._wa_log("Nothing to send: tick at least one district and type its group name.")
+            return
+        self._wa_running = True
+        self.wa_send_btn.config(state="disabled")
+        self.wa_progress.start(12)
+        aged_days = int(self.wa_aged_var.get() or 0)
+        excluded_stores = list(self.wa_cfg.get("excluded_stores", []))
+        self._wa_log("-" * 55)
+        self._wa_log(f"Sending {len(targets)} district(s), aged >= {aged_days} days"
+                     f"{f' (excluding {len(excluded_stores)} store pattern(s))' if excluded_stores else ''}...")
+        threading.Thread(target=self._wa_send_worker,
+                         args=(targets, aged_days, excluded_stores), daemon=True).start()
+
+    def _wa_send_worker(self, targets, aged_days, excluded_stores):
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_PNG_NAME)
+        for district, group in targets:
+            rows = wa_filter_rows(self.wa_rows, district, aged_days, excluded_stores)
+            if not rows:
+                self._wa_log(f"{district}: 0 device(s) aged >= {aged_days} days after "
+                             f"exclusions — skipped.")
+                continue
+            try:
+                img = wa_render_table_image(district, rows, logo_path=logo_path, group_label=group)
+            except Exception as e:
+                self._wa_log(f"{district}: ERROR building image: {e}")
+                continue
+            self._wa_log(f"{district}: {len(rows)} device(s) -> '{group}' — sending...")
+            try:
+                ok, msg = send_image_to_whatsapp_group(group, img, log=self._wa_log)
+            except Exception as e:
+                ok, msg = False, str(e)
+            self._wa_log(f"{district}: {'OK' if ok else 'FAILED'} — {msg}")
+        self.root.after(0, self._wa_send_done)
+
+    def _wa_send_done(self):
+        self.wa_progress.stop()
+        self.wa_send_btn.config(state="normal")
+        self._wa_running = False
+        self._wa_log("-" * 55)
+
     def _copyright_bar(self):
         bar = tk.Frame(self.root, bg=NAVY, height=26)
         bar.pack(fill="x", side="bottom"); bar.pack_propagate(False)
@@ -1646,6 +2316,16 @@ class App:
                 self.log_box.config(state="normal")
                 self.log_box.insert("end", msg + "\n"); self.log_box.see("end")
                 self.log_box.config(state="disabled")
+        except queue.Empty:
+            pass
+        # WhatsApp tab: separate queue so its background send-thread never
+        # touches the Email/Sheets tab's widgets (and vice versa).
+        try:
+            while True:
+                msg = self._wa_q.get_nowait()
+                self.wa_log_box.config(state="normal")
+                self.wa_log_box.insert("end", msg + "\n"); self.wa_log_box.see("end")
+                self.wa_log_box.config(state="disabled")
         except queue.Empty:
             pass
         self.root.after(80, self._poll)

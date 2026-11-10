@@ -1,4 +1,4 @@
-# Aging processor: Excel + Google Sheets + drag-drop
+# Aging processor: Excel + Google Sheets + drag-drop + WhatsApp Desktop tab
 # Developed by www.3SVerse.com
 
 openpyxl>=3.1.0
@@ -8,3 +8,4 @@ pywin32>=306
 gspread>=5.0.0
 gspread-formatting>=1.0.0
 tkinterdnd2>=0.3.0
+pywinauto>=0.6.8
