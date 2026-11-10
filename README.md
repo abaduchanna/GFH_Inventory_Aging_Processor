@@ -26,9 +26,11 @@ GFH/VDS app window), then a table of DISTRICT, STORE, PRODUCT, IMEI,
 AGE IN COMPANY, PO RECEIVING DATE — pasted straight into that WhatsApp
 Desktop group's chat and sent.
 
-**Requires `pywinauto`** (`pip install pywinauto`, included in
+**Requires `pyautogui`** (`pip install pyautogui`, included in
 `requirements.txt`) and the WhatsApp Desktop Windows app (not WhatsApp Web)
-signed in. If a send step can't find a UI element (WhatsApp updates its
-interface from time to time), the Activity Log says exactly which step
-failed — the image is still on the clipboard and the chat is already open,
-so finishing with Ctrl+V and Enter takes one second by hand.
+signed in. Uses the same proven ctypes + win32clipboard automation layer as
+GFH_Audit_Automation.py / GFH_Inventory_Audit.py — no pywinauto/comtypes, so
+no extra bundle size or startup delay. If a send step fails (WhatsApp not
+installed, lost focus, etc.), the Activity Log says exactly why — the image
+is still on the clipboard and the chat is already open, so finishing with
+Ctrl+V and Enter takes one second by hand.
