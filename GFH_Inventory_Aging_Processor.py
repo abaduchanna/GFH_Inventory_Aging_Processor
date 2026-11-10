@@ -97,9 +97,16 @@ try:
 except ImportError:
     _HAS_PIL = False
 try:
-    import pywinauto as _pywinauto_probe  # noqa: F401
-    _HAS_PYWINAUTO_PROBE = True
-except ImportError:
+    # NEVER `import pywinauto` here: importing it eagerly triggers comtypes'
+    # COM-wrapper codegen for UI Automation, which in a frozen onefile EXE
+    # has nowhere persistent to cache its generated files — so it redoes
+    # that (slow) codegen on every single launch, stalling the splash
+    # screen for a long time before the window ever appears. A presence
+    # check (no import) is enough here; the real import happens lazily,
+    # only when the user actually clicks Send on the WhatsApp tab.
+    import importlib.util as _ilu
+    _HAS_PYWINAUTO_PROBE = _ilu.find_spec("pywinauto") is not None
+except Exception:
     _HAS_PYWINAUTO_PROBE = False
 
 # Import openpyxl Border/Side with aliases to avoid conflict with gspread_formatting's Border
@@ -441,12 +448,11 @@ WA_TABLE_COLUMNS = [
     ("PO RECEIVING DATE", "po_date", 170),
 ]
 
-try:
-    import pywinauto  # noqa: F401
-    from pywinauto import Desktop
-    _HAS_PYWINAUTO = True
-except ImportError:
-    _HAS_PYWINAUTO = False
+# Same reasoning as _HAS_PYWINAUTO_PROBE above: no eager import here. The
+# actual `from pywinauto import Desktop` happens inside
+# send_image_to_whatsapp_group(), on the background send-thread, the one
+# time it's genuinely needed - never at app startup.
+_HAS_PYWINAUTO = _HAS_PYWINAUTO_PROBE
 
 
 def _wa_norm_header(h):
@@ -703,6 +709,14 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20):
         return False, f"Could not copy image to clipboard: {e}"
 
     import time as _time
+    try:
+        # Imported here, not at module load: this is comtypes' first real
+        # use, so its one-time UI-Automation codegen happens now (on this
+        # background thread, only when a send is actually requested) and
+        # never delays the app opening.
+        from pywinauto import Desktop
+    except Exception as e:
+        return False, f"pywinauto import failed: {e}"
 
     try:
         desktop = Desktop(backend="uia")
