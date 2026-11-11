@@ -1,5 +1,10 @@
 # Aging processor: Excel + Google Sheets + drag-drop + WhatsApp Desktop tab
 # Developed by www.3SVerse.com
+#
+# tkinterdnd2 is only used by the Tkinter build (GFH_Inventory_Aging_Processor.py).
+# PySide6 is only used by the Qt pilot build (GFH_Inventory_Aging_Processor_Qt.py) -
+# both builds ship from this one repo during the migration, so both toolkits'
+# deps live here together.
 
 openpyxl>=3.1.0
 pandas>=2.2.0
@@ -9,3 +14,4 @@ gspread>=5.0.0
 gspread-formatting>=1.0.0
 tkinterdnd2>=0.3.0
 pyautogui>=0.9.54
+PySide6>=6.7.0

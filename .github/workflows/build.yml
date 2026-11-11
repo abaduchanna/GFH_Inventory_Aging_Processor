@@ -17,6 +17,7 @@ jobs:
       matrix:
         app:
           - GFH_Inventory_Aging_Processor
+          - GFH_Inventory_Aging_Processor_Qt
 
     steps:
       - name: Checkout
