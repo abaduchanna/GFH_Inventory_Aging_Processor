@@ -981,24 +981,17 @@ def _wa_save_rect(hwnd):
         return None
 
 
-def _wa_click(x, y):
-    """Left-click at an absolute screen coordinate using real OS-level input
-    (SetCursorPos + SendInput) - this DOES move the person's visible mouse
-    cursor. A message-based "invisible" click (posting WM_LBUTTONDOWN
-    straight to the window, no real cursor movement) was tried and
-    reproducibly failed to open the search box at all: WhatsApp Desktop is
-    WebView2/Chromium-based, and Chromium's input pipeline only reacts to
-    real hardware-level input (SendInput), not posted window messages -
-    this exact SendInput version is what worked in live testing before."""
-    u = _wa_ct.windll.user32
-    u.SetCursorPos(int(x), int(y))
-    time.sleep(0.05)
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
-    down = _WA_INPUT(type=0); down.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0)
-    up = _WA_INPUT(type=0); up.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0)
-    u.SendInput(1, _wa_ct.byref(down), _wa_ct.sizeof(down))
-    time.sleep(0.03)
-    u.SendInput(1, _wa_ct.byref(up), _wa_ct.sizeof(up))
+def _wa_restore_rect(hwnd, saved_rect):
+    """Identical to WhatsAppSender._restore_whatsapp_rect in the proven apps."""
+    if not hwnd or not saved_rect:
+        return
+    try:
+        x, y, w, h = saved_rect
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        _wa_ct.windll.user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
+    except Exception:
+        pass
 
 
 def _wa_win32_key_down(vk_code):
@@ -1084,20 +1077,19 @@ def _wa_set_clipboard_text(text):
         u.CloseClipboard()
 
 
+def _wa_active_guard():
+    """Never type blind: WhatsApp must be the foreground window right now."""
+    hwnd = _wa_find_hwnd()
+    if hwnd is None:
+        raise RuntimeError("WhatsApp Desktop window not found - nothing was typed.")
+    if not _wa_guard(hwnd):
+        raise RuntimeError("WhatsApp Desktop is not in front - nothing was typed.")
+
+
 def _wa_paste_text(text):
     """Enter text into the focused field: clipboard + Ctrl+V, falling back to
-    Unicode typing. NOT guarded (matches _wa_paste_text in the confirmed-
-    working VidaPay_Incentive_Extractor.py/Device_Ordering.py exactly) - an
-    earlier version of this file guarded every single hotkey/paste/press
-    call, which meant the aggressive refocus escalation in _wa_guard (ALT-
-    tap, AttachThreadInput, SwitchToThisWindow, even a minimize/restore
-    cycle) could fire BETWEEN every keystroke of a single logical step, and
-    very plausibly collapsed whatever WhatsApp had just opened (e.g. the
-    chat-list search) back to its default view before the next keystroke
-    landed. Guarding only belongs at specific checkpoints between logical
-    steps - see _wa_type_group_search and send_image_to_whatsapp_group,
-    which now guard exactly where _wa_open_chat/_wa_send_in_chat do and
-    nowhere else."""
+    Unicode typing (guarded) - identical to the proven apps."""
+    _wa_active_guard()
     try:
         if _wa_set_clipboard_text(text):
             time.sleep(0.2)
@@ -1109,68 +1101,46 @@ def _wa_paste_text(text):
     _wa_win32_write(text, 0.02)
 
 
-# Unguarded aliases - same as the confirmed-working apps' own
-# "_wa_hotkey = _wa_win32_hotkey" / "_wa_press = _wa_win32_press" routing.
-_wa_hotkey = _wa_win32_hotkey
-_wa_press = _wa_win32_press
-_wa_write = _wa_win32_write
+def _wa_hotkey(*keys):
+    _wa_active_guard()
+    _wa_win32_hotkey(*keys)
 
 
-def _wa_type_group_search(hwnd, group_name, log=None):
-    """Open the chat-list search and jump to `group_name` by clicking it -
-    no keyboard shortcut involved anywhere in this. Ctrl+F and Ctrl+K were
-    both tried and both reproducibly failed on this WhatsApp Desktop build:
-    live testing showed the group name landing in whatever chat was
-    already open instead, proving focus never actually reached a search
-    box either way - so neither is used, by design, not as a fallback.
+def _wa_press(key):
+    _wa_active_guard()
+    _wa_win32_press(key)
 
-    Clicks the "Search or start a new chat" box by its position
-    (proportional to the actual window rect, not a fixed pixel guess) using
-    posted window messages (_wa_click - no SetCursorPos/SendInput, so the
-    person's real mouse never visibly moves), types the group name
-    straight in (no Ctrl+A - the box should be empty right after opening),
-    then clicks the first filtered result INSTEAD OF pressing Enter - a
-    missed click then just types into nothing rather than risking a send
-    into the wrong chat. Returns True when the chat should now be open,
-    False if focus was lost and nothing more should be typed. Guarded only
-    at specific checkpoints (never before every single keystroke - an
-    earlier version did that, and the aggressive refocus it could trigger,
-    up to a minimize/restore cycle, was itself capable of collapsing
-    whatever had just opened)."""
-    log = log or _wa_log
-    rect = _wa_save_rect(hwnd)
-    if rect is None:
-        log("Could not read the WhatsApp window's position for a click.")
-        return False
-    left, top, w, h = rect
-    search_x, search_y = left + max(70, int(w * 0.12)), top + int(h * 0.065)
-    log(f"  click method: window=({left},{top},{w}x{h}) -> search click at ({search_x},{search_y})")
-    _wa_click(search_x, search_y)
-    time.sleep(0.4)
-    if not _wa_guard(hwnd, log):
-        return False
+
+def _wa_write(text, interval=0.0):
+    _wa_active_guard()
+    _wa_win32_write(text, interval)
+# ── END ROBUST WHATSAPP DESKTOP LAYER - byte-for-byte identical to the ──────
+# ── proven apps' own layer from here up (same guards, same timings). ───────
+
+
+def _wa_type_group_search(group_name):
+    """Identical to WhatsAppSender._type_group_search in the proven apps:
+    Ctrl+F, Ctrl+A, paste the group name, Enter - same order, same sleeps."""
+    _wa_hotkey("ctrl", "f")
+    time.sleep(0.7)
+    _wa_hotkey("ctrl", "a")
+    time.sleep(0.2)
     _wa_paste_text(group_name)
     time.sleep(1.2)
-    result_y = search_y + 64
-    log(f"  click method: first-result click at ({search_x},{result_y})")
-    _wa_click(search_x, result_y)  # click the result, never Enter here
-    time.sleep(1.3)
-    return _wa_guard(hwnd, log)
-# ==================== END ROBUST WHATSAPP DESKTOP LAYER ====================
+    _wa_press("enter")
+    time.sleep(1.5)
 
 
 def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20, caption=""):
-    """WhatsApp Desktop (Win32 app, not WhatsApp Web) automation.
-
-    Focus WhatsApp (via _wa_ensure_focused - launching it only if it isn't
-    already running, never force-relaunching an already-open instance),
-    find the group by clicking the search box (_wa_type_group_search - no
-    keyboard shortcut: Ctrl+F and Ctrl+K were both tried and both
-    reproducibly failed on this WhatsApp Desktop build), paste the image +
-    caption and send. Every step is logged and wrapped so a failure
-    anywhere still leaves the image sitting in the compose box (and on the
-    clipboard) for the user to finish by hand with one Enter — it never
-    silently does nothing.
+    """Byte-for-byte the same flow as WhatsAppSender.send_image in
+    GFH_Audit_Automation.py / GFH_Inventory_Audit.py (confirmed working on
+    this same PC, sending both an image and a caption, no mouse ever
+    moved): relaunch WhatsApp via its "whatsapp:" protocol handler EVERY
+    time (even if already open), save the window rect, force-focus +
+    verify, Ctrl+F search for the group, paste the image (Ctrl+V), paste
+    the caption into the preview dialog, Enter to send, restore the
+    window rect. No mouse, no clicks, no "improvements" on the proven
+    sequence - every step, order and sleep matches it exactly.
 
     Returns (ok: bool, message: str).
     """
@@ -1185,67 +1155,58 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20, caption
     except Exception as e:
         return False, f"pyautogui import failed: {e}"
 
-    try:
-        wa_copy_image_to_clipboard(img)
-    except Exception as e:
-        return False, f"Could not copy image to clipboard: {e}"
-
     log(f"Opening WhatsApp Desktop for {group_name}...")
+    _wa_launch()
+    time.sleep(3.0)  # identical to WhatsAppSender._open_whatsapp()
+
+    wa_hwnd = _wa_find_hwnd() or 0
+    wa_rect = _wa_save_rect(wa_hwnd) if wa_hwnd else None
+
     try:
         hwnd = _wa_ensure_focused(log)
     except Exception as e:
         hwnd = None
         log(f"WhatsApp focus error: {e}")
     if hwnd is None:
-        return False, ("Could not bring WhatsApp Desktop to the front. Is it"
-                        " installed and signed in? (Image is on the"
-                        " clipboard — you can paste it yourself with Ctrl+V.)")
+        return False, "Could not bring WhatsApp Desktop to the front - nothing was typed."
 
     log(f"Searching group: {group_name}")
     try:
-        opened = _wa_type_group_search(hwnd, group_name, log=log)
+        _wa_type_group_search(group_name)
     except Exception as e:
-        opened = False
-        log(f"Search error: {e}")
-    if not opened:
-        return False, (f"Could not open group '{group_name}' — WhatsApp lost focus or the "
-                        "search didn't land (nothing further was typed, so nothing should "
-                        "have been sent). Image is on the clipboard if you want to finish by hand.")
+        return False, (f"Could not search/open group '{group_name}': {e}"
+                        " (image is on the clipboard — paste with Ctrl+V and press Enter).")
 
-    # From here on, same checkpoint-guard style as _wa_send_in_chat: guard
-    # right before anything that could land in the wrong place, never guard
-    # mid-keystroke.
-    if not _wa_guard(hwnd, log):
-        return False, "WhatsApp lost focus before the image could be pasted — nothing was sent."
+    log("Copying image to clipboard...")
+    try:
+        wa_copy_image_to_clipboard(img)
+    except Exception as e:
+        return False, f"Could not copy image to clipboard: {e}"
+
     try:
         _wa_hotkey("ctrl", "v")  # opens WhatsApp's image-preview/send dialog
     except Exception as e:
         return False, f"Could not paste the image: {e}"
-    time.sleep(3.0)  # let the preview dialog fully load
+    time.sleep(3.0)  # let the preview dialog fully load before doing anything else
 
     if caption:
-        if not _wa_guard(hwnd, log):
-            return False, ("WhatsApp lost focus before the caption could be typed — the image"
-                            " may be sitting unsent in the preview dialog.")
+        log("Typing caption into image preview field...")
         try:
-            # WhatsApp Desktop focuses the preview's caption field
-            # automatically when the image-attach dialog opens - type
-            # straight into it.
+            # WhatsApp Desktop focuses the caption field automatically when
+            # the image preview dialog opens. Type directly into it.
             _wa_paste_text(caption)
         except Exception as e:
             return False, f"Could not type the caption: {e}"
         time.sleep(0.8)
 
-    if not _wa_guard(hwnd, log):
-        return False, ("WhatsApp lost focus before sending — the image/caption may be sitting"
-                        " unsent in the preview dialog; check WhatsApp and press Enter yourself.")
     try:
-        _wa_press("enter")  # Enter confirms the image-preview dialog
+        _wa_press("enter")  # Send the image (Enter confirms the image-preview dialog)
     except Exception as e:
         return False, f"Could not confirm the send: {e}"
     time.sleep(2.0)
+    _wa_restore_rect(wa_hwnd, wa_rect)
+    log(f"Sent image to {group_name}")
     return True, f"Sent to '{group_name}'" + (" with caption." if caption else ".")
-
 
 # ==========================================================
 # DATA CLEANING / PROCESSING
