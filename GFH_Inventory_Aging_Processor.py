@@ -982,22 +982,24 @@ def _wa_save_rect(hwnd):
 
 
 def _wa_click(x, y):
-    """Left-click at an absolute screen coordinate - moves the real OS
-    cursor there (keyboard calls above never touch the mouse; this does,
-    deliberately, since confirmed live testing shows NEITHER Ctrl+F nor
-    Ctrl+K moves keyboard focus at all on this WhatsApp Desktop build -
-    both silently no-op, leaving every subsequent keystroke to land in
-    whatever chat's compose box already had focus. A click is the only way
-    left to move focus to a specific control without UI Automation."""
+    """Left-click at an absolute screen coordinate WITHOUT moving the real
+    OS cursor: finds the actual child window under that point and posts it
+    WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP directly (SendMessage, not
+    SendInput+SetCursorPos) - invisible on screen, the person's own mouse
+    is never touched while this runs in the background."""
     u = _wa_ct.windll.user32
-    u.SetCursorPos(int(x), int(y))
-    time.sleep(0.05)
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
-    down = _WA_INPUT(type=0); down.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0)
-    up = _WA_INPUT(type=0); up.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0)
-    u.SendInput(1, _wa_ct.byref(down), _wa_ct.sizeof(down))
-    time.sleep(0.05)
-    u.SendInput(1, _wa_ct.byref(up), _wa_ct.sizeof(up))
+    pt = _wa_wt.POINT(int(x), int(y))
+    target = u.WindowFromPoint(pt)
+    if not target:
+        return
+    cpt = _wa_wt.POINT(int(x), int(y))
+    u.ScreenToClient(target, _wa_ct.byref(cpt))
+    lparam = (cpt.y << 16) | (cpt.x & 0xFFFF)
+    WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0200, 0x0201, 0x0202, 0x0001
+    u.SendMessageW(target, WM_MOUSEMOVE, 0, lparam)
+    u.SendMessageW(target, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
+    time.sleep(0.03)
+    u.SendMessageW(target, WM_LBUTTONUP, 0, lparam)
 
 
 def _wa_win32_key_down(vk_code):
@@ -1124,15 +1126,18 @@ def _wa_type_group_search(hwnd, group_name, log=None):
     box either way - so neither is used, by design, not as a fallback.
 
     Clicks the "Search or start a new chat" box by its position
-    (proportional to the actual window rect, not a fixed pixel guess),
-    types the group name, then clicks the first filtered result INSTEAD OF
-    pressing Enter - a missed click then just types into nothing rather
-    than risking a send into the wrong chat. Returns True when the chat
-    should now be open, False if focus was lost and nothing more should be
-    typed. Guarded only at specific checkpoints (never before every single
-    keystroke - an earlier version did that, and the aggressive refocus it
-    could trigger, up to a minimize/restore cycle, was itself capable of
-    collapsing whatever had just opened)."""
+    (proportional to the actual window rect, not a fixed pixel guess) using
+    posted window messages (_wa_click - no SetCursorPos/SendInput, so the
+    person's real mouse never visibly moves), types the group name
+    straight in (no Ctrl+A - the box should be empty right after opening),
+    then clicks the first filtered result INSTEAD OF pressing Enter - a
+    missed click then just types into nothing rather than risking a send
+    into the wrong chat. Returns True when the chat should now be open,
+    False if focus was lost and nothing more should be typed. Guarded only
+    at specific checkpoints (never before every single keystroke - an
+    earlier version did that, and the aggressive refocus it could trigger,
+    up to a minimize/restore cycle, was itself capable of collapsing
+    whatever had just opened)."""
     log = log or _wa_log
     rect = _wa_save_rect(hwnd)
     if rect is None:
@@ -1145,8 +1150,6 @@ def _wa_type_group_search(hwnd, group_name, log=None):
     time.sleep(0.4)
     if not _wa_guard(hwnd, log):
         return False
-    _wa_hotkey("ctrl", "a")
-    time.sleep(0.2)
     _wa_paste_text(group_name)
     time.sleep(1.2)
     result_y = search_y + 64
