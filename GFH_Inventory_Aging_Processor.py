@@ -642,7 +642,7 @@ def load_whatsapp_config():
     path = os.path.join(get_app_dir(), WHATSAPP_CONFIG_FILE)
     cfg = {
         "aged_days": 30, "last_file": "", "districts": {}, "excluded_stores": [],
-        "search_shortcut": "ctrl+f", "message_template": WA_DEFAULT_MESSAGE,
+        "search_shortcut": "click", "message_template": WA_DEFAULT_MESSAGE,
     }
     if os.path.exists(path):
         try:
@@ -663,7 +663,7 @@ def load_whatsapp_config():
             if isinstance(ex, list):
                 cfg["excluded_stores"] = [str(s).strip() for s in ex if str(s).strip()]
             shortcut = str(saved.get("search_shortcut", "") or "").strip().lower()
-            if shortcut in ("ctrl+k", "ctrl+f"):
+            if shortcut in ("click", "ctrl+k", "ctrl+f"):
                 cfg["search_shortcut"] = shortcut
             msg = saved.get("message_template", "")
             if isinstance(msg, str) and msg.strip():
@@ -995,6 +995,25 @@ def _wa_restore_rect(hwnd, saved_rect):
         pass
 
 
+def _wa_click(x, y):
+    """Left-click at an absolute screen coordinate - moves the real OS
+    cursor there (keyboard calls above never touch the mouse; this does,
+    deliberately, since confirmed live testing shows NEITHER Ctrl+F nor
+    Ctrl+K moves keyboard focus at all on this WhatsApp Desktop build -
+    both silently no-op, leaving every subsequent keystroke to land in
+    whatever chat's compose box already had focus. A click is the only way
+    left to move focus to a specific control without UI Automation."""
+    u = _wa_ct.windll.user32
+    u.SetCursorPos(int(x), int(y))
+    time.sleep(0.05)
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
+    down = _WA_INPUT(type=0); down.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0)
+    up = _WA_INPUT(type=0); up.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0)
+    u.SendInput(1, _wa_ct.byref(down), _wa_ct.sizeof(down))
+    time.sleep(0.05)
+    u.SendInput(1, _wa_ct.byref(up), _wa_ct.sizeof(up))
+
+
 def _wa_win32_key_down(vk_code):
     scan = _wa_ct.windll.user32.MapVirtualKeyW(vk_code, 0)
     _wa_send_key(vk_code, scan, 0x1 if vk_code in _WA_EXT_VKS else 0)
@@ -1112,24 +1131,57 @@ def _wa_press(key):
     _wa_win32_press(key)
 
 
-def _wa_type_group_search(group_name, shortcut="ctrl+f"):
-    """Open the chat-list search and jump to `group_name` - identical logic
-    to GFH_Audit_Automation.py's _type_group_search (keyboard shortcut only,
-    no mouse click: that app doesn't use one, so this doesn't either)."""
-    keys = [k.strip() for k in shortcut.lower().split("+") if k.strip()] or ["ctrl", "f"]
-    _wa_hotkey(*keys)
-    time.sleep(0.7)
+def _wa_type_group_search(group_name, shortcut="click", hwnd=None, log=None):
+    """Open the chat-list search and jump to `group_name`.
+
+    "ctrl+f"/"ctrl+k": the keyboard approach GFH_Audit_Automation.py uses -
+    kept selectable for whoever's WhatsApp build does honor one of them.
+
+    "click" (now the default): confirmed live testing shows BOTH keyboard
+    shortcuts silently no-op on this WhatsApp Desktop build - focus simply
+    never left the already-open chat, so the typed group name AND the
+    later caption both landed, concatenated, in that chat's own compose
+    box and got sent as real messages. A mouse click is the only way left
+    to move focus to a specific control without UI Automation: it clicks
+    the "Search or start a new chat" box by its position (proportional to
+    the actual window rect, not a fixed pixel guess), then clicks the
+    first filtered result INSTEAD OF pressing Enter - so a click that
+    misses the search box just types into nothing rather than risking a
+    send, the same mistake Enter caused twice already."""
+    log = log or _wa_log
+    if shortcut in ("ctrl+k", "ctrl+f"):
+        keys = [k.strip() for k in shortcut.lower().split("+") if k.strip()] or ["ctrl", "f"]
+        _wa_hotkey(*keys)
+        time.sleep(0.7)
+        _wa_hotkey("ctrl", "a")
+        time.sleep(0.2)
+        _wa_paste_text(group_name)
+        time.sleep(1.2)
+        _wa_press("enter")
+        time.sleep(1.5)
+        return
+
+    rect = _wa_save_rect(hwnd) if hwnd else None
+    if rect is None:
+        raise RuntimeError("Could not read the WhatsApp window's position for a click.")
+    left, top, w, h = rect
+    search_x, search_y = left + max(70, int(w * 0.12)), top + int(h * 0.065)
+    log(f"  click method: window=({left},{top},{w}x{h}) -> search click at ({search_x},{search_y})")
+    _wa_click(search_x, search_y)
+    time.sleep(0.4)
     _wa_hotkey("ctrl", "a")
     time.sleep(0.2)
     _wa_paste_text(group_name)
     time.sleep(1.2)
-    _wa_press("enter")
-    time.sleep(1.5)
+    result_y = search_y + 64
+    log(f"  click method: first-result click at ({search_x},{result_y})")
+    _wa_click(search_x, result_y)  # click the result, never Enter here
+    time.sleep(1.3)
 # ==================== END ROBUST WHATSAPP DESKTOP LAYER ====================
 
 
 def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20,
-                                  shortcut="ctrl+f", caption=""):
+                                  shortcut="click", caption=""):
     """WhatsApp Desktop (Win32 app, not WhatsApp Web) automation - a faithful
     port of WhatsAppSender.send_image in GFH_Audit_Automation.py /
     GFH_Inventory_Audit.py (same steps, same order, same sleeps): relaunch
@@ -1175,9 +1227,9 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20,
                         " installed and signed in? (Image is on the"
                         " clipboard — you can paste it yourself with Ctrl+V.)")
 
-    log(f"Searching group: {group_name} (shortcut: {shortcut})")
+    log(f"Searching group: {group_name} (method: {shortcut})")
     try:
-        _wa_type_group_search(group_name, shortcut)
+        _wa_type_group_search(group_name, shortcut, hwnd=hwnd, log=log)
     except Exception as e:
         return False, (f"Could not search/open group '{group_name}': {e}"
                         " (image is on the clipboard — paste with Ctrl+V and press Enter).")
@@ -2516,15 +2568,16 @@ class App:
 
         # WhatsApp search shortcut + caption message
         opt2 = tk.Frame(body, bg=LIGHT); opt2.pack(fill="x", pady=(0, 10))
-        tk.Label(opt2, text="WhatsApp search shortcut:", bg=LIGHT, fg=NAVY,
+        tk.Label(opt2, text="Find group by:", bg=LIGHT, fg=NAVY,
                  font=("Calibri", 10, "bold")).pack(side="left")
         self.wa_shortcut_var = tk.StringVar(
-            value=self.wa_cfg.get("search_shortcut", "ctrl+f"))
+            value=self.wa_cfg.get("search_shortcut", "click"))
         ttk.Combobox(opt2, textvariable=self.wa_shortcut_var, state="readonly",
-                     width=9, values=["ctrl+f", "ctrl+k"]
+                     width=9, values=["click", "ctrl+f", "ctrl+k"]
                      ).pack(side="left", padx=(8, 20))
-        tk.Label(opt2, text="Same shortcut GFH_Audit_Automation uses. If sending opens the "
-                           "wrong chat, switch this and test again with ONE district first.",
+        tk.Label(opt2, text="\"click\" finds the search box on screen (default - neither "
+                           "keyboard shortcut moved focus in testing). If it still opens "
+                           "the wrong chat, test again with ONE district before changing this.",
                  bg=LIGHT, fg="#666", font=("Calibri", 8), wraplength=560,
                  justify="left").pack(side="left")
 
@@ -2748,7 +2801,7 @@ class App:
             "last_file": self.wa_cfg.get("last_file", ""),
             "districts": {},
             "excluded_stores": list(self.wa_cfg.get("excluded_stores", [])),
-            "search_shortcut": self.wa_shortcut_var.get().strip().lower() or "ctrl+f",
+            "search_shortcut": self.wa_shortcut_var.get().strip().lower() or "click",
             "message_template": self.wa_message_var.get().strip() or WA_DEFAULT_MESSAGE,
         }
         for d, (chk_var, grp_var) in self.wa_row_widgets.items():
@@ -2779,7 +2832,7 @@ class App:
         self.wa_progress.start(12)
         aged_days = int(self.wa_aged_var.get() or 0)
         excluded_stores = list(self.wa_cfg.get("excluded_stores", []))
-        shortcut = self.wa_shortcut_var.get().strip().lower() or "ctrl+f"
+        shortcut = self.wa_shortcut_var.get().strip().lower() or "click"
         template = self.wa_message_var.get().strip() or WA_DEFAULT_MESSAGE
         try:
             caption = template.format(days=aged_days)
