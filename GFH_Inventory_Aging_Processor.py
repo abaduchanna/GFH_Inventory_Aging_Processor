@@ -1196,6 +1196,16 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20, caption
     if hwnd is None:
         return False, "Could not bring WhatsApp Desktop to the front - nothing was typed."
 
+    # Defensively close any leftover image-preview dialog from a previous
+    # chunk whose final Enter did not register (otherwise the next chunk's
+    # Ctrl+V would stack its image/caption on top of that still-open,
+    # unsent dialog instead of starting a fresh search+paste).
+    try:
+        _wa_press("escape")
+        time.sleep(0.4)
+    except Exception:
+        pass
+
     log(f"Searching group: {group_name}")
     try:
         _wa_type_group_search(group_name)
@@ -1229,6 +1239,15 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20, caption
         _wa_press("enter")  # Send the image (Enter confirms the image-preview dialog)
     except Exception as e:
         return False, f"Could not confirm the send: {e}"
+    time.sleep(1.0)
+    try:
+        # Safety-net second Enter: harmless no-op if the first already sent
+        # (nothing left to confirm, empty chat box), but catches the rare
+        # case where the first Enter was swallowed (e.g. by an emoji
+        # autocomplete popup) and the preview dialog is still open.
+        _wa_press("enter")
+    except Exception:
+        pass
     time.sleep(2.0)
     _wa_restore_rect(wa_hwnd, wa_rect)
     log(f"Sent image to {group_name}")
