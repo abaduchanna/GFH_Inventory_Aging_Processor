@@ -982,24 +982,23 @@ def _wa_save_rect(hwnd):
 
 
 def _wa_click(x, y):
-    """Left-click at an absolute screen coordinate WITHOUT moving the real
-    OS cursor: finds the actual child window under that point and posts it
-    WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP directly (SendMessage, not
-    SendInput+SetCursorPos) - invisible on screen, the person's own mouse
-    is never touched while this runs in the background."""
+    """Left-click at an absolute screen coordinate using real OS-level input
+    (SetCursorPos + SendInput) - this DOES move the person's visible mouse
+    cursor. A message-based "invisible" click (posting WM_LBUTTONDOWN
+    straight to the window, no real cursor movement) was tried and
+    reproducibly failed to open the search box at all: WhatsApp Desktop is
+    WebView2/Chromium-based, and Chromium's input pipeline only reacts to
+    real hardware-level input (SendInput), not posted window messages -
+    this exact SendInput version is what worked in live testing before."""
     u = _wa_ct.windll.user32
-    pt = _wa_wt.POINT(int(x), int(y))
-    target = u.WindowFromPoint(pt)
-    if not target:
-        return
-    cpt = _wa_wt.POINT(int(x), int(y))
-    u.ScreenToClient(target, _wa_ct.byref(cpt))
-    lparam = (cpt.y << 16) | (cpt.x & 0xFFFF)
-    WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0200, 0x0201, 0x0202, 0x0001
-    u.SendMessageW(target, WM_MOUSEMOVE, 0, lparam)
-    u.SendMessageW(target, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
+    u.SetCursorPos(int(x), int(y))
+    time.sleep(0.05)
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
+    down = _WA_INPUT(type=0); down.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0)
+    up = _WA_INPUT(type=0); up.mi = _WA_MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0)
+    u.SendInput(1, _wa_ct.byref(down), _wa_ct.sizeof(down))
     time.sleep(0.03)
-    u.SendMessageW(target, WM_LBUTTONUP, 0, lparam)
+    u.SendInput(1, _wa_ct.byref(up), _wa_ct.sizeof(up))
 
 
 def _wa_win32_key_down(vk_code):
