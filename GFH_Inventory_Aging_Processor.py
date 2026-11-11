@@ -447,6 +447,11 @@ WA_TABLE_COLUMNS = [
     ("PO RECEIVING DATE", "po_date", 170),
 ]
 
+WA_DEFAULT_MESSAGE = (
+    "Team, the attached devices have been sitting in inventory for {days}+ "
+    "days. Please prioritize them for sale."
+)
+
 
 
 def _wa_norm_header(h):
@@ -635,7 +640,10 @@ def wa_render_table_image(district, rows, logo_path=None, group_label=None):
 
 def load_whatsapp_config():
     path = os.path.join(get_app_dir(), WHATSAPP_CONFIG_FILE)
-    cfg = {"aged_days": 30, "last_file": "", "districts": {}, "excluded_stores": []}
+    cfg = {
+        "aged_days": 30, "last_file": "", "districts": {}, "excluded_stores": [],
+        "search_shortcut": "ctrl+k", "message_template": WA_DEFAULT_MESSAGE,
+    }
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -654,6 +662,12 @@ def load_whatsapp_config():
             ex = saved.get("excluded_stores", [])
             if isinstance(ex, list):
                 cfg["excluded_stores"] = [str(s).strip() for s in ex if str(s).strip()]
+            shortcut = str(saved.get("search_shortcut", "") or "").strip().lower()
+            if shortcut in ("ctrl+k", "ctrl+f"):
+                cfg["search_shortcut"] = shortcut
+            msg = saved.get("message_template", "")
+            if isinstance(msg, str) and msg.strip():
+                cfg["message_template"] = msg
         except Exception:
             pass
     return cfg
@@ -1076,8 +1090,21 @@ def _wa_press(key):
     _wa_win32_press(key)
 
 
-def _wa_type_group_search(group_name):
-    _wa_hotkey("ctrl", "f")
+def _wa_type_group_search(group_name, shortcut="ctrl+k"):
+    """Open the global chat search and jump to `group_name`.
+
+    WhatsApp Desktop's keyboard shortcut for this varies by version/build:
+    some use Ctrl+K for "new chat/search", others Ctrl+F - which on recent
+    versions instead means "search inside the CURRENTLY OPEN chat" and does
+    NOT move focus to the chat-list search box at all. Sending this wrong
+    is dangerous (not just ineffective): with focus still in whatever chat
+    was already open, the next steps would select-all + paste the group
+    NAME + Enter directly into THAT chat's message box, sending the group
+    name as a real message to the wrong person. `shortcut` is user-chosen
+    (UI dropdown, saved per-install) specifically so this can be corrected
+    without a code change the first time it picks the wrong one."""
+    keys = [k.strip() for k in shortcut.lower().split("+") if k.strip()] or ["ctrl", "k"]
+    _wa_hotkey(*keys)
     time.sleep(0.7)
     _wa_hotkey("ctrl", "a")
     time.sleep(0.2)
@@ -1088,14 +1115,15 @@ def _wa_type_group_search(group_name):
 # ==================== END ROBUST WHATSAPP DESKTOP LAYER ====================
 
 
-def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20):
+def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20,
+                                  shortcut="ctrl+k", caption=""):
     """WhatsApp Desktop (Win32 app, not WhatsApp Web) automation using the
     same proven ctypes-based layer as GFH_Audit_Automation.py /
     GFH_Inventory_Audit.py: focus the app, open the named chat via its
-    search box, paste the image and send. Every step is logged and wrapped
-    so a failure anywhere still leaves the image sitting in the compose box
-    (and on the clipboard) for the user to finish by hand with one Enter —
-    it never silently does nothing.
+    search box, paste the image (+ optional caption) and send. Every step
+    is logged and wrapped so a failure anywhere still leaves the image
+    sitting in the compose box (and on the clipboard) for the user to
+    finish by hand with one Enter — it never silently does nothing.
 
     Returns (ok: bool, message: str).
     """
@@ -1126,9 +1154,9 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20):
                         " installed and signed in? (Image is on the"
                         " clipboard — you can paste it yourself with Ctrl+V.)")
 
-    log(f"Searching group: {group_name}")
+    log(f"Searching group: {group_name} (shortcut: {shortcut})")
     try:
-        _wa_type_group_search(group_name)
+        _wa_type_group_search(group_name, shortcut)
     except Exception as e:
         return False, (f"Could not search/open group '{group_name}': {e}"
                         " (image is on the clipboard — paste with Ctrl+V and press Enter).")
@@ -1136,8 +1164,14 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20):
     try:
         _wa_hotkey("ctrl", "v")  # opens WhatsApp's image-preview/send dialog
         time.sleep(3.0)  # let the preview dialog fully load
+        if caption:
+            # WhatsApp Desktop focuses the preview's caption field
+            # automatically when the image-attach dialog opens - type
+            # straight into it, same as the proven apps.
+            _wa_paste_text(caption)
+            time.sleep(0.5)
         _wa_press("enter")  # Enter confirms the image-preview dialog
-        return True, f"Sent to '{group_name}'."
+        return True, f"Sent to '{group_name}'" + (" with caption." if caption else ".")
     except Exception as e:
         return False, (f"Pasted into '{group_name}' but could not send: {e}"
                         " (image is on the clipboard — paste with Ctrl+V and press Enter).")
@@ -2300,6 +2334,24 @@ class App:
             self.root.configure(bg=colors.get("bg", "#f6f7fb"))
         except Exception:
             pass
+        self._wa_theme_fixups(colors)
+
+    def _wa_theme_fixups(self, colors=None):
+        """Re-color the WhatsApp tab's "brand"-tagged widgets (the ones the
+        shared theme walker is told to skip) by hand, since they need a
+        readonlybackground the walker doesn't know to touch. Safe to call
+        before the tab exists yet."""
+        entry = getattr(self, "wa_file_entry", None)
+        if entry is None:
+            return
+        if colors is None:
+            colors = self.theme_manager.get_colors()
+        bg = colors.get("input", "#e8eff8")
+        fg = colors.get("text", NAVY)
+        try:
+            entry.configure(bg=bg, fg=fg, readonlybackground=bg, insertbackground=fg)
+        except Exception:
+            pass
     def _body(self, parent):
         body = tk.Frame(parent, bg=LIGHT)
         body.pack(fill="both", expand=True, padx=24, pady=18)
@@ -2405,11 +2457,21 @@ class App:
         # File row
         frow = tk.Frame(body, bg=LIGHT); frow.pack(fill="x", pady=(0, 10))
         frow.columnconfigure(0, weight=1)
-        tk.Entry(frow, textvariable=self.wa_file_path, state="readonly",
-                 font=("Calibri", 9), relief="flat", bg="#e8eff8", fg=NAVY,
-                 readonlybackground="#e8eff8",
-                 highlightbackground="#b0c4de", highlightthickness=1
-                 ).grid(row=0, column=0, sticky="ew", ipady=5, padx=(0, 8))
+        self.wa_file_entry = tk.Entry(
+            frow, textvariable=self.wa_file_path, state="readonly",
+            font=("Calibri", 9), relief="flat",
+            highlightbackground="#b0c4de", highlightthickness=1)
+        self.wa_file_entry.grid(row=0, column=0, sticky="ew", ipady=5, padx=(0, 8))
+        # The shared theme walker recolors Entry widgets' fg to the current
+        # theme's text color but only knows to recolor plain bg, not
+        # readonlybackground (what a readonly Entry actually displays) - a
+        # fixed/hardcoded readonlybackground would go invisible against a
+        # fg color that changes with the theme. Tag it "brand" (an existing
+        # protected tag) so the walker leaves it alone entirely, and we set
+        # BOTH colors ourselves instead - see _wa_theme_fixups(), called
+        # here and again on every theme toggle via _apply_theme().
+        self.wa_file_entry._tag = "brand"
+        self._wa_theme_fixups()
         ttk.Button(frow, text="Browse", style="Browse.TButton",
                    command=self._wa_browse).grid(row=0, column=1, padx=(0, 8))
         self.wa_load_btn = ttk.Button(frow, text="Load Districts", style="Run.TButton",
@@ -2428,6 +2490,29 @@ class App:
                    command=self._wa_open_store_exclusions).pack(side="left")
         tk.Label(opt, text="  Tick a district, type its WhatsApp group name, then Save.",
                  bg=LIGHT, fg="#666", font=("Calibri", 9)).pack(side="left")
+
+        # WhatsApp search shortcut + caption message
+        opt2 = tk.Frame(body, bg=LIGHT); opt2.pack(fill="x", pady=(0, 10))
+        tk.Label(opt2, text="WhatsApp search shortcut:", bg=LIGHT, fg=NAVY,
+                 font=("Calibri", 10, "bold")).pack(side="left")
+        self.wa_shortcut_var = tk.StringVar(
+            value=self.wa_cfg.get("search_shortcut", "ctrl+k"))
+        ttk.Combobox(opt2, textvariable=self.wa_shortcut_var, state="readonly",
+                     width=9, values=["ctrl+k", "ctrl+f"]
+                     ).pack(side="left", padx=(8, 20))
+        tk.Label(opt2, text="WhatsApp Desktop varies by version — if sending opens the "
+                           "wrong chat, switch this and test again with one district.",
+                 bg=LIGHT, fg="#666", font=("Calibri", 8), wraplength=560,
+                 justify="left").pack(side="left")
+
+        msg_row = tk.Frame(body, bg=LIGHT); msg_row.pack(fill="x", pady=(0, 10))
+        tk.Label(msg_row, text="Message sent with each image ({days} = the Aged-days box above):",
+                 bg=LIGHT, fg=NAVY, font=("Calibri", 9, "bold")).pack(anchor="w")
+        self.wa_message_var = tk.StringVar(value=self.wa_cfg.get(
+            "message_template", WA_DEFAULT_MESSAGE))
+        tk.Entry(msg_row, textvariable=self.wa_message_var, font=("Calibri", 10),
+                 relief="flat", highlightbackground="#b0c4de", highlightthickness=1
+                 ).pack(fill="x", ipady=4, pady=(2, 0))
 
         # Scrollable districts panel
         tk.Label(body, text="Districts", font=("Calibri", 9, "bold"),
@@ -2458,6 +2543,12 @@ class App:
             text="Select a file above and click \"Load Districts\".",
             bg=WHITE, fg="#888", font=("Calibri", 10), pady=16)
         self.wa_empty_label.pack(fill="x")
+        # These widgets are created AFTER the one apply_theme_to_window() call
+        # in __init__, so they'd otherwise be stuck at their WHITE
+        # creation-time color forever in dark mode. Re-run it now (and again
+        # whenever the district rows are rebuilt) so they pick up whichever
+        # theme is actually active, exactly like every other widget does.
+        self._apply_theme()
 
         # Buttons
         btn_row = tk.Frame(body, bg=LIGHT); btn_row.pack(fill="x", pady=(0, 10))
@@ -2467,6 +2558,11 @@ class App:
                                        style="Run.TButton", command=self._wa_send,
                                        state="disabled")
         self.wa_send_btn.pack(side="left", fill="x", expand=True)
+        tk.Label(body, text="Tip: tick only ONE district and send it first to confirm the "
+                            "search shortcut above actually opens the right group before "
+                            "sending to everyone.",
+                 bg=LIGHT, fg="#b45309", font=("Calibri", 8, "italic")
+                 ).pack(anchor="w", pady=(2, 0))
 
         self.wa_progress = ttk.Progressbar(body, mode="indeterminate",
                                             style="Accent.Horizontal.TProgressbar")
@@ -2486,6 +2582,12 @@ class App:
         n = len(self.wa_cfg.get("excluded_stores", []))
         if n:
             self._wa_log(f"{n} store(s) excluded from sends — see Store Exclusions.")
+
+        # Widgets above were built before any theme re-walk could reach them
+        # (the only one so far ran right after the file-path entry, earlier
+        # in this method) - run it once more now that the whole tab exists,
+        # so it looks correct immediately rather than only after Load.
+        self._apply_theme()
 
     def _wa_log(self, msg):
         """Thread-safe: always goes through the queue _poll() drains, even
@@ -2524,42 +2626,74 @@ class App:
             child.destroy()
         self.wa_row_widgets = {}
         saved = self.wa_cfg.get("districts", {})
+        # Seed with the CURRENT theme's colors (not hardcoded light ones) so
+        # a fresh Load looks right immediately. Deliberately NOT tagged
+        # "brand": tagging a Frame also stops the shared theme walker from
+        # ever recursing into its children (that was the actual bug - the
+        # WhatsApp-group Entry fields stayed stuck light because the row
+        # Frame around them was tagged and silently blocked the walker from
+        # reaching them at all). Leaving everything untagged means toggling
+        # the theme later re-colors these rows correctly too, same as any
+        # other widget in the app - the one trade-off is the alternating
+        # row stripe flattens to one color after a toggle, which is a minor
+        # cosmetic cost worth paying for colors that are always correct.
+        colors = self.theme_manager.get_colors()
+        panel = colors.get("panel", WHITE)
+        panel_alt = colors.get("panel_alt", "#eef2f8")
+        text_fg = colors.get("text", NAVY)
         for i, d in enumerate(self.wa_districts):
             entry = saved.get(d, {})
-            stripe = WHITE if i % 2 == 0 else "#eef2f8"
+            stripe = panel if i % 2 == 0 else panel_alt
             row = tk.Frame(self.wa_districts_frame, bg=stripe)
             row.pack(fill="x")
             chk_var = tk.BooleanVar(value=bool(entry.get("checked", False)))
             tk.Checkbutton(row, variable=chk_var, bg=stripe, activebackground=stripe
                            ).pack(side="left", padx=(10, 6), pady=6)
-            tk.Label(row, text=d, bg=stripe, fg=NAVY, font=("Calibri", 10, "bold"),
+            tk.Label(row, text=d, bg=stripe, fg=text_fg, font=("Calibri", 10, "bold"),
                      width=18, anchor="w").pack(side="left", padx=(0, 10))
-            tk.Label(row, text="WhatsApp group:", bg=stripe, fg="#555",
+            tk.Label(row, text="WhatsApp group:", bg=stripe, fg=text_fg,
                      font=("Calibri", 9)).pack(side="left", padx=(0, 6))
             grp_var = tk.StringVar(value=entry.get("group", ""))
             tk.Entry(row, textvariable=grp_var, font=("Calibri", 10),
-                     relief="flat", bg="#e8eff8",
+                     relief="flat", bg=colors.get("input", "#e8eff8"), fg=text_fg,
+                     insertbackground=text_fg,
                      highlightbackground="#b0c4de", highlightthickness=1
                      ).pack(side="left", fill="x", expand=True, padx=(0, 12), ipady=3)
             self.wa_row_widgets[d] = (chk_var, grp_var)
+        self._apply_theme()
 
     def _wa_open_store_exclusions(self):
+        colors = self.theme_manager.get_colors()
+        bg = colors.get("bg", LIGHT)
+        text_fg = colors.get("text", COLOR_TEXT)
+        input_bg = colors.get("input", WHITE)
+
         win = tk.Toplevel(self.root)
         win.title("Store Exclusions (WhatsApp tab)")
-        win.configure(bg=LIGHT)
-        win.geometry("480x420")
+        win.configure(bg=bg)
+        win.geometry("520x520")
+        win.minsize(420, 360)
         win.transient(self.root)
         tk.Label(win, text="Stores listed here are left out of every WhatsApp send "
                            "(this tab only — the Email/Sheets Exclusions panel is separate).",
-                 bg=LIGHT, fg="#555", font=("Calibri", 9), wraplength=440,
+                 bg=bg, fg=text_fg, font=("Calibri", 9), wraplength=480,
                  justify="left").pack(anchor="w", padx=10, pady=(10, 4))
         tk.Label(win, text="One store name per line. Matches case-insensitively; "
                            "partial names match too (e.g. \"Houston\" matches every "
                            "store containing that word).",
-                 bg=LIGHT, fg="#888", font=("Calibri", 8), wraplength=440,
+                 bg=bg, fg="#888", font=("Calibri", 8), wraplength=480,
                  justify="left").pack(anchor="w", padx=10, pady=(0, 6))
-        box = scrolledtext.ScrolledText(win, font=("Consolas", 9), bg=WHITE,
-                                        fg=COLOR_TEXT, relief="flat", wrap="word",
+
+        # Button row packed FIRST at the bottom, so it always keeps its space
+        # regardless of the ScrolledText's size - previously it was packed
+        # after an expand=True ScrolledText with no height limit, which could
+        # claim the whole window and push Save/Cancel out of view.
+        btns = tk.Frame(win, bg=bg)
+        btns.pack(side="bottom", fill="x", padx=10, pady=10)
+
+        box = scrolledtext.ScrolledText(win, font=("Consolas", 9), bg=input_bg,
+                                        fg=text_fg, insertbackground=text_fg,
+                                        relief="flat", wrap="word", height=14,
                                         highlightbackground="#b0c4de", highlightthickness=1)
         box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         box.insert("1.0", "\n".join(self.wa_cfg.get("excluded_stores", [])))
@@ -2580,7 +2714,6 @@ class App:
             self._wa_log(f"Store Exclusions saved: {len(out)} store(s) excluded.")
             win.destroy()
 
-        btns = tk.Frame(win, bg=LIGHT); btns.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Button(btns, text="Save", style="Run.TButton", command=_save
                    ).pack(side="right", padx=(8, 0))
         ttk.Button(btns, text="Cancel", style="Browse.TButton", command=win.destroy
@@ -2592,6 +2725,8 @@ class App:
             "last_file": self.wa_cfg.get("last_file", ""),
             "districts": {},
             "excluded_stores": list(self.wa_cfg.get("excluded_stores", [])),
+            "search_shortcut": self.wa_shortcut_var.get().strip().lower() or "ctrl+k",
+            "message_template": self.wa_message_var.get().strip() or WA_DEFAULT_MESSAGE,
         }
         for d, (chk_var, grp_var) in self.wa_row_widgets.items():
             cfg["districts"][d] = {"checked": bool(chk_var.get()),
@@ -2621,13 +2756,21 @@ class App:
         self.wa_progress.start(12)
         aged_days = int(self.wa_aged_var.get() or 0)
         excluded_stores = list(self.wa_cfg.get("excluded_stores", []))
+        shortcut = self.wa_shortcut_var.get().strip().lower() or "ctrl+k"
+        template = self.wa_message_var.get().strip() or WA_DEFAULT_MESSAGE
+        try:
+            caption = template.format(days=aged_days)
+        except Exception:
+            caption = template  # bad {placeholder} in a hand-edited template - send as-is
         self._wa_log("-" * 55)
         self._wa_log(f"Sending {len(targets)} district(s), aged >= {aged_days} days"
-                     f"{f' (excluding {len(excluded_stores)} store pattern(s))' if excluded_stores else ''}...")
+                     f"{f' (excluding {len(excluded_stores)} store pattern(s))' if excluded_stores else ''}"
+                     f", search shortcut {shortcut}...")
         threading.Thread(target=self._wa_send_worker,
-                         args=(targets, aged_days, excluded_stores), daemon=True).start()
+                         args=(targets, aged_days, excluded_stores, shortcut, caption),
+                         daemon=True).start()
 
-    def _wa_send_worker(self, targets, aged_days, excluded_stores):
+    def _wa_send_worker(self, targets, aged_days, excluded_stores, shortcut, caption):
         logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_PNG_NAME)
         for district, group in targets:
             rows = wa_filter_rows(self.wa_rows, district, aged_days, excluded_stores)
@@ -2642,7 +2785,8 @@ class App:
                 continue
             self._wa_log(f"{district}: {len(rows)} device(s) -> '{group}' — sending...")
             try:
-                ok, msg = send_image_to_whatsapp_group(group, img, log=self._wa_log)
+                ok, msg = send_image_to_whatsapp_group(
+                    group, img, log=self._wa_log, shortcut=shortcut, caption=caption)
             except Exception as e:
                 ok, msg = False, str(e)
             self._wa_log(f"{district}: {'OK' if ok else 'FAILED'} — {msg}")
