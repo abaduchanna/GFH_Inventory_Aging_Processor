@@ -452,6 +452,16 @@ WA_DEFAULT_MESSAGE = (
     "days. Please prioritize them for sale."
 )
 
+# Same chunk size as GFH_Audit_Automation.py's AUTO_SEND_CHUNK_SIZE: a table
+# image with too many rows becomes unreadable on a phone, so a long list is
+# split into several images ("... | Part N") instead of one giant one.
+WA_SEND_CHUNK_SIZE = 22
+
+
+def wa_chunks(rows, size=WA_SEND_CHUNK_SIZE):
+    for i in range(0, len(rows), size):
+        yield rows[i:i + size]
+
 
 
 def _wa_norm_header(h):
@@ -533,15 +543,29 @@ def wa_unique_districts(rows):
 
 def wa_filter_rows(rows, district, aged_days, excluded_stores=None):
     """Devices in `district` aged `aged_days` or more (blank/unknown age
-    excluded), minus any store matching an entry in `excluded_stores`
-    (same case-insensitive contains-match as the main Exclusions panel,
-    via store_matches_pattern)."""
+    excluded), with a blank/empty IMEI (e.g. "Deposits" line items that
+    aren't real devices - same rule as the Email/Sheets pipeline's "remove
+    rows with blank Serial 1"), minus any store matching an entry in
+    `excluded_stores` (same case-insensitive contains-match as the main
+    Exclusions panel, via store_matches_pattern)."""
+    try:
+        aged_days = int(aged_days)
+    except Exception:
+        aged_days = 0
     pats = [s for s in (excluded_stores or []) if s and s.strip()]
     out = []
     for r in rows:
         if r["district"] != district:
             continue
-        if r["age_in_company"] is None or r["age_in_company"] < aged_days:
+        if not str(r.get("imei") or "").strip():
+            continue
+        age = r.get("age_in_company")
+        if age is None:
+            continue
+        try:
+            if int(age) < aged_days:
+                continue
+        except Exception:
             continue
         if pats and any(store_matches_pattern(r["store"], p) for p in pats):
             continue
@@ -549,7 +573,7 @@ def wa_filter_rows(rows, district, aged_days, excluded_stores=None):
     return out
 
 
-def wa_render_table_image(district, rows, logo_path=None, group_label=None):
+def wa_render_table_image(district, rows, logo_path=None, group_label=None, part_label=None):
     """GFH-branded screenshot: navy top bar + logo, dark-navy column header
     row (matches every other GFH/VDS app's header styling), alternating rows."""
     from PIL import Image, ImageDraw, ImageFont
@@ -607,6 +631,8 @@ def wa_render_table_image(district, rows, logo_path=None, group_label=None):
     title = f"Aged Devices \u2014 {district}"
     if group_label:
         title += f"  ({group_label})"
+    if part_label:
+        title += f"  | {part_label}"
     d.text((width / 2, brand_bar_h / 2), title, font=font(16, True),
            fill=white, anchor="mm")
 
@@ -2791,18 +2817,28 @@ class App:
                 self._wa_log(f"{district}: 0 device(s) aged >= {aged_days} days after "
                              f"exclusions — skipped.")
                 continue
-            try:
-                img = wa_render_table_image(district, rows, logo_path=logo_path, group_label=group)
-            except Exception as e:
-                self._wa_log(f"{district}: ERROR building image: {e}")
-                continue
-            self._wa_log(f"{district}: {len(rows)} device(s) -> '{group}' — sending...")
-            try:
-                ok, msg = send_image_to_whatsapp_group(
-                    group, img, log=self._wa_log, caption=caption)
-            except Exception as e:
-                ok, msg = False, str(e)
-            self._wa_log(f"{district}: {'OK' if ok else 'FAILED'} — {msg}")
+            # Long lists become unreadable as one image on a phone - split
+            # into several, same chunk size GFH_Audit_Automation.py uses.
+            chunks = list(wa_chunks(rows))
+            multi = len(chunks) > 1
+            self._wa_log(f"{district}: {len(rows)} device(s) -> '{group}'"
+                         f"{f' in {len(chunks)} part(s)' if multi else ''} — sending...")
+            for i, chunk_rows in enumerate(chunks, start=1):
+                part_label = f"Part {i} of {len(chunks)}" if multi else None
+                try:
+                    img = wa_render_table_image(district, chunk_rows, logo_path=logo_path,
+                                                 group_label=group, part_label=part_label)
+                except Exception as e:
+                    self._wa_log(f"{district}{f' Part {i}' if multi else ''}: "
+                                 f"ERROR building image: {e}")
+                    continue
+                try:
+                    ok, msg = send_image_to_whatsapp_group(
+                        group, img, log=self._wa_log, caption=caption)
+                except Exception as e:
+                    ok, msg = False, str(e)
+                tag = f"{district}{f' Part {i}/{len(chunks)}' if multi else ''}"
+                self._wa_log(f"{tag}: {'OK' if ok else 'FAILED'} — {msg}")
         self.root.after(0, self._wa_send_done)
 
     def _wa_send_done(self):
