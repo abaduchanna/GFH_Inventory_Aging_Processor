@@ -642,7 +642,7 @@ def load_whatsapp_config():
     path = os.path.join(get_app_dir(), WHATSAPP_CONFIG_FILE)
     cfg = {
         "aged_days": 30, "last_file": "", "districts": {}, "excluded_stores": [],
-        "search_shortcut": "click", "message_template": WA_DEFAULT_MESSAGE,
+        "search_shortcut": "ctrl+f", "message_template": WA_DEFAULT_MESSAGE,
     }
     if os.path.exists(path):
         try:
@@ -984,17 +984,6 @@ def _wa_save_rect(hwnd):
         return None
 
 
-def _wa_restore_rect(hwnd, saved_rect):
-    if not hwnd or not saved_rect:
-        return
-    try:
-        x, y, w, h = saved_rect
-        SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
-        _wa_ct.windll.user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
-    except Exception:
-        pass
-
-
 def _wa_click(x, y):
     """Left-click at an absolute screen coordinate - moves the real OS
     cursor there (keyboard calls above never touch the mouse; this does,
@@ -1131,23 +1120,22 @@ def _wa_press(key):
     _wa_win32_press(key)
 
 
-def _wa_type_group_search(group_name, shortcut="click", hwnd=None, log=None):
+def _wa_type_group_search(group_name, shortcut="ctrl+f", hwnd=None, log=None):
     """Open the chat-list search and jump to `group_name`.
 
-    "ctrl+f"/"ctrl+k": the keyboard approach GFH_Audit_Automation.py uses -
-    kept selectable for whoever's WhatsApp build does honor one of them.
+    "ctrl+f" (default)/"ctrl+k": exactly the flow in _wa_open_chat in
+    VidaPay_Incentive_Extractor.py / VidaPay_Device_Ordering.py, behind the
+    confirmed-working WhatsApp 2FA alert on this same PC. An earlier
+    version of this app forced WhatsApp to relaunch via its "whatsapp:"
+    protocol handler before every send (copied from a different, unproven
+    code path in GFH_Audit_Automation.py); removing that is the one real
+    difference between this and the confirmed-working flow.
 
-    "click" (now the default): confirmed live testing shows BOTH keyboard
-    shortcuts silently no-op on this WhatsApp Desktop build - focus simply
-    never left the already-open chat, so the typed group name AND the
-    later caption both landed, concatenated, in that chat's own compose
-    box and got sent as real messages. A mouse click is the only way left
-    to move focus to a specific control without UI Automation: it clicks
-    the "Search or start a new chat" box by its position (proportional to
-    the actual window rect, not a fixed pixel guess), then clicks the
-    first filtered result INSTEAD OF pressing Enter - so a click that
-    misses the search box just types into nothing rather than risking a
-    send, the same mistake Enter caused twice already."""
+    "click": fallback if ctrl+f/ctrl+k still land in the wrong chat here.
+    Clicks the "Search or start a new chat" box by its position
+    (proportional to the actual window rect), then clicks the first
+    filtered result INSTEAD OF pressing Enter - a missed click then just
+    types into nothing rather than risking a send."""
     log = log or _wa_log
     if shortcut in ("ctrl+k", "ctrl+f"):
         keys = [k.strip() for k in shortcut.lower().split("+") if k.strip()] or ["ctrl", "f"]
@@ -1181,18 +1169,21 @@ def _wa_type_group_search(group_name, shortcut="click", hwnd=None, log=None):
 
 
 def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20,
-                                  shortcut="click", caption=""):
-    """WhatsApp Desktop (Win32 app, not WhatsApp Web) automation - a faithful
-    port of WhatsAppSender.send_image in GFH_Audit_Automation.py /
-    GFH_Inventory_Audit.py (same steps, same order, same sleeps): relaunch
-    WhatsApp via its "whatsapp:" protocol handler EVERY time (even if
-    already open - this resets it to a known state rather than whatever
-    chat happened to be open), save its window rect, focus + verify it,
-    search for the group via keyboard shortcut, paste the image (+ caption)
-    and send, then restore the window rect. Every step is logged and
-    wrapped so a failure anywhere still leaves the image sitting in the
-    compose box (and on the clipboard) for the user to finish by hand with
-    one Enter — it never silently does nothing.
+                                  shortcut="ctrl+f", caption=""):
+    """WhatsApp Desktop (Win32 app, not WhatsApp Web) automation.
+
+    Matches _wa_ensure_focused + _wa_open_chat exactly as used by the
+    CONFIRMED-WORKING WhatsApp 2FA alert in VidaPay_Incentive_Extractor.py /
+    VidaPay_Device_Ordering.py on this same PC — focus WhatsApp (launching
+    it only if it isn't already running; never force-relaunch an already-
+    open instance, which earlier code here did and which that confirmed
+    path does not), then Ctrl+F / Ctrl+A / paste the group name / Enter.
+    Image + caption + the final send Enter are new on top of that (the
+    confirmed path only ever sends plain text), so that part remains the
+    least-proven piece. Every step is logged and wrapped so a failure
+    anywhere still leaves the image sitting in the compose box (and on the
+    clipboard) for the user to finish by hand with one Enter — it never
+    silently does nothing.
 
     Returns (ok: bool, message: str).
     """
@@ -1213,10 +1204,6 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20,
         return False, f"Could not copy image to clipboard: {e}"
 
     log(f"Opening WhatsApp Desktop for {group_name}...")
-    _wa_launch()           # ALWAYS, same as the proven apps' _open_whatsapp()
-    time.sleep(2.0)        # (their launch already sleeps 3s total; _wa_ensure_focused adds more below)
-    wa_hwnd = _wa_find_hwnd()
-    wa_rect = _wa_save_rect(wa_hwnd) if wa_hwnd else None
     try:
         hwnd = _wa_ensure_focused(log)
     except Exception as e:
@@ -1245,7 +1232,6 @@ def send_image_to_whatsapp_group(group_name, img, log=print, timeout=20,
             time.sleep(0.8)
         _wa_press("enter")  # Enter confirms the image-preview dialog
         time.sleep(2.0)
-        _wa_restore_rect(wa_hwnd, wa_rect)
         return True, f"Sent to '{group_name}'" + (" with caption." if caption else ".")
     except Exception as e:
         return False, (f"Pasted into '{group_name}' but could not send: {e}"
@@ -2568,16 +2554,17 @@ class App:
 
         # WhatsApp search shortcut + caption message
         opt2 = tk.Frame(body, bg=LIGHT); opt2.pack(fill="x", pady=(0, 10))
-        tk.Label(opt2, text="Find group by:", bg=LIGHT, fg=NAVY,
+        tk.Label(opt2, text="WhatsApp search shortcut:", bg=LIGHT, fg=NAVY,
                  font=("Calibri", 10, "bold")).pack(side="left")
         self.wa_shortcut_var = tk.StringVar(
-            value=self.wa_cfg.get("search_shortcut", "click"))
+            value=self.wa_cfg.get("search_shortcut", "ctrl+f"))
         ttk.Combobox(opt2, textvariable=self.wa_shortcut_var, state="readonly",
-                     width=9, values=["click", "ctrl+f", "ctrl+k"]
+                     width=9, values=["ctrl+f", "ctrl+k", "click"]
                      ).pack(side="left", padx=(8, 20))
-        tk.Label(opt2, text="\"click\" finds the search box on screen (default - neither "
-                           "keyboard shortcut moved focus in testing). If it still opens "
-                           "the wrong chat, test again with ONE district before changing this.",
+        tk.Label(opt2, text="Same shortcut + flow as the 2FA alert in Incentive Extractor / "
+                           "Device Ordering (confirmed working on this PC). \"click\" is a "
+                           "fallback if this still opens the wrong chat — test with ONE "
+                           "district either way.",
                  bg=LIGHT, fg="#666", font=("Calibri", 8), wraplength=560,
                  justify="left").pack(side="left")
 
@@ -2801,7 +2788,7 @@ class App:
             "last_file": self.wa_cfg.get("last_file", ""),
             "districts": {},
             "excluded_stores": list(self.wa_cfg.get("excluded_stores", [])),
-            "search_shortcut": self.wa_shortcut_var.get().strip().lower() or "click",
+            "search_shortcut": self.wa_shortcut_var.get().strip().lower() or "ctrl+f",
             "message_template": self.wa_message_var.get().strip() or WA_DEFAULT_MESSAGE,
         }
         for d, (chk_var, grp_var) in self.wa_row_widgets.items():
@@ -2832,7 +2819,7 @@ class App:
         self.wa_progress.start(12)
         aged_days = int(self.wa_aged_var.get() or 0)
         excluded_stores = list(self.wa_cfg.get("excluded_stores", []))
-        shortcut = self.wa_shortcut_var.get().strip().lower() or "click"
+        shortcut = self.wa_shortcut_var.get().strip().lower() or "ctrl+f"
         template = self.wa_message_var.get().strip() or WA_DEFAULT_MESSAGE
         try:
             caption = template.format(days=aged_days)
