@@ -1981,7 +1981,7 @@ class SettingsDialogQt(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings — Sender & District Contacts")
-        self.resize(640, 560)
+        self.resize(760, 580)
 
         cfg = load_contacts_config()
         self._vars = {}
@@ -2174,9 +2174,13 @@ class ExclusionsDialogQt(QDialog):
         text = f"{len(entries)} {label}"
         if bad:
             text += f"   |   {len(bad)} not 15 digits"
-            cnt.setStyleSheet("color: #c82020; font-weight: bold;")
+            cnt.setStyleSheet("color: #e83030; font-weight: bold;")
         else:
-            cnt.setStyleSheet("color: #090d26; font-weight: bold;")
+            # No override - inherit the app-wide theme's text color so it
+            # stays legible in both light and dark mode (a hardcoded navy
+            # here was invisible against the dark theme's dark background -
+            # the same class of bug the WhatsApp tab had earlier).
+            cnt.setStyleSheet("font-weight: bold;")
         cnt.setText(text)
 
     def _clear(self):
@@ -2399,27 +2403,27 @@ class MainWindow(QMainWindow):
         body.addLayout(opt_row)
 
         btn_row = QHBoxLayout()
-        self.run_btn = QPushButton("Process & Email Reports")
+        self.run_btn = QPushButton("Process && Email Reports")
         self.run_btn.clicked.connect(self._start_local)
-        btn_row.addWidget(self.run_btn, 1)
+        btn_row.addWidget(self.run_btn)
 
         self.upload_btn = QPushButton("Upload to Google Sheets")
         self.upload_btn.clicked.connect(self._start_google)
         self.upload_btn.setEnabled(_HAS_GSPREAD and _HAS_GSPREAD_FMT)
-        btn_row.addWidget(self.upload_btn, 1)
+        btn_row.addWidget(self.upload_btn)
 
         self.link_btn = QPushButton("Open Google Sheet")
         self.link_btn.clicked.connect(self._open_sheet)
         self.link_btn.setEnabled(False)
-        btn_row.addWidget(self.link_btn, 1)
+        btn_row.addWidget(self.link_btn)
 
         self.settings_btn = QPushButton("Settings (Contacts)")
         self.settings_btn.clicked.connect(self._open_settings)
-        btn_row.addWidget(self.settings_btn, 1)
+        btn_row.addWidget(self.settings_btn)
 
         self.excl_btn = QPushButton("Exclusions")
         self.excl_btn.clicked.connect(self._open_exclusions)
-        btn_row.addWidget(self.excl_btn, 1)
+        btn_row.addWidget(self.excl_btn); btn_row.addStretch(1)
         body.addLayout(btn_row)
 
         self.progress = QProgressBar()
@@ -2658,7 +2662,8 @@ class MainWindow(QMainWindow):
             item = self.wa_districts_layout.takeAt(0)
             w = item.widget()
             if w:
-                w.deleteLater()
+                w.setParent(None)  # remove from display immediately
+                w.deleteLater()    # free it once the event loop is free
         self.wa_row_widgets = {}
         saved = self.wa_cfg.get("districts", {})
         for d in self.wa_districts:
