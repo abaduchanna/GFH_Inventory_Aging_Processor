@@ -133,7 +133,7 @@ class FixedHeaderManagerQt:
         self.title_label.setObjectName("gfhHeader")
         self.title_label.setAlignment(Qt.AlignCenter)
         self.title_label.setStyleSheet(f"background: {self.BRAND_NAVY}; color: {BRAND_WHITE};")
-        self.title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        self.title_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
         outer.addWidget(self.title_label, 1)
 
         # RIGHT: theme toggle placeholder (added via add_theme_toggle)

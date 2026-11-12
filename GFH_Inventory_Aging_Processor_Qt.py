@@ -2726,34 +2726,43 @@ class MainWindow(QMainWindow):
                          daemon=True).start()
 
     def _wa_send_worker(self, targets, aged_days, excluded_stores, caption):
-        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_PNG_NAME)
-        for district, group in targets:
-            rows = wa_filter_rows(self.wa_rows, district, aged_days, excluded_stores)
-            if not rows:
-                self._wa_log(f"{district}: 0 device(s) aged >= {aged_days} days after "
-                             f"exclusions — skipped.")
-                continue
-            chunks = list(wa_chunks(rows))
-            multi = len(chunks) > 1
-            self._wa_log(f"{district}: {len(rows)} device(s) -> '{group}'"
-                         f"{f' in {len(chunks)} part(s)' if multi else ''} — sending...")
-            for i, chunk_rows in enumerate(chunks, start=1):
-                part_label = f"Part {i} of {len(chunks)}" if multi else None
-                try:
-                    img = wa_render_table_image(district, chunk_rows, logo_path=logo_path,
-                                                 group_label=group, part_label=part_label)
-                except Exception as e:
-                    self._wa_log(f"{district}{f' Part {i}' if multi else ''}: "
-                                 f"ERROR building image: {e}")
+        # try/finally guarantees _wa_send_done always runs (re-enabling the
+        # button, stopping the progress bar) even if something in the loop
+        # below raises an exception the per-chunk try/except doesn't catch —
+        # otherwise the UI is left looking "stuck running" forever even
+        # though the sends already finished.
+        try:
+            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_PNG_NAME)
+            for district, group in targets:
+                rows = wa_filter_rows(self.wa_rows, district, aged_days, excluded_stores)
+                if not rows:
+                    self._wa_log(f"{district}: 0 device(s) aged >= {aged_days} days after "
+                                 f"exclusions — skipped.")
                     continue
-                try:
-                    ok, msg = send_image_to_whatsapp_group(
-                        group, img, log=self._wa_log, caption=caption)
-                except Exception as e:
-                    ok, msg = False, str(e)
-                tag = f"{district}{f' Part {i}/{len(chunks)}' if multi else ''}"
-                self._wa_log(f"{tag}: {'OK' if ok else 'FAILED'} — {msg}")
-        QTimer.singleShot(0, self._wa_send_done)
+                chunks = list(wa_chunks(rows))
+                multi = len(chunks) > 1
+                self._wa_log(f"{district}: {len(rows)} device(s) -> '{group}'"
+                             f"{f' in {len(chunks)} part(s)' if multi else ''} — sending...")
+                for i, chunk_rows in enumerate(chunks, start=1):
+                    part_label = f"Part {i} of {len(chunks)}" if multi else None
+                    try:
+                        img = wa_render_table_image(district, chunk_rows, logo_path=logo_path,
+                                                     group_label=group, part_label=part_label)
+                    except Exception as e:
+                        self._wa_log(f"{district}{f' Part {i}' if multi else ''}: "
+                                     f"ERROR building image: {e}")
+                        continue
+                    try:
+                        ok, msg = send_image_to_whatsapp_group(
+                            group, img, log=self._wa_log, caption=caption)
+                    except Exception as e:
+                        ok, msg = False, str(e)
+                    tag = f"{district}{f' Part {i}/{len(chunks)}' if multi else ''}"
+                    self._wa_log(f"{tag}: {'OK' if ok else 'FAILED'} — {msg}")
+        except Exception as e:
+            self._wa_log(f"ERROR: sending stopped unexpectedly — {e}")
+        finally:
+            QTimer.singleShot(0, self._wa_send_done)
 
     def _wa_send_done(self):
         self.wa_progress.setVisible(False)

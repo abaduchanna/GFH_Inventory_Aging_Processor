@@ -81,7 +81,7 @@ class FixedHeaderManager:
         self.title_label = tk.Label(
             self.header_frame,
             text=title,
-            font=("Segoe UI", 16, "bold"),
+            font=("Segoe UI", 20, "bold"),
             fg="white",
             bg=self.BRAND_NAVY,
             highlightthickness=0,
