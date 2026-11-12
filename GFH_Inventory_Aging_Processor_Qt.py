@@ -525,6 +525,8 @@ def wa_filter_rows(rows, district, aged_days, excluded_stores=None):
         if pats and any(store_matches_pattern(r["store"], p) for p in pats):
             continue
         out.append(r)
+    # Store ascending, then Age in Company (days in company) descending within each store.
+    out.sort(key=lambda r: (str(r.get("store") or "").lower(), -int(r.get("age_in_company"))))
     return out
 
 
