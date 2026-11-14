@@ -12,12 +12,20 @@ import math
 import os
 
 from PySide6.QtCore import Qt, QRectF, QPointF
-from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QFont, QPolygonF
+from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QFont, QPolygonF, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QLabel, QFrame, QHBoxLayout, QVBoxLayout, QSizePolicy
 )
 
-_HEADER_MANAGER_QT_VERSION = "1.0.0"
+_HEADER_MANAGER_QT_VERSION = "1.1.0"
+
+# Title headline size chosen in the VidaPay_Rebate_Filing UI-polish round.
+# The label auto-shrinks (never below TITLE_MIN_PT) when the text does not
+# fit, so long product names (e.g. "VDS Desk Solutions - Legacy Excel
+# Converter" in an 1100px window) clip-proof while short titles keep the
+# full 32pt headline look.
+TITLE_BASE_PT = 32
+TITLE_MIN_PT = 15
 
 BRAND_NAVY = "#090d26"
 BRAND_RED = "#e83030"
@@ -88,6 +96,44 @@ class ThemeToggleGlyph(QWidget):
         painter.end()
 
 
+class _TitleLabel(QLabel):
+    """Centered headline title that keeps its font-size in its own
+    stylesheet (the app-wide QSS cascade `QWidget { font-size: 13px; }`
+    silently wins over setFont() - see the title block below) and
+    auto-shrinks on resize so the text never clips its label."""
+
+    def __init__(self, text):
+        super().__init__(text)
+        # _pt starts at 0 so the first _apply_fit() ALWAYS writes the
+        # stylesheet - if the very first width already fit 32pt, skipping the
+        # write would leave the app-wide QSS `QWidget { font-size: 13px; }`
+        # cascade in charge of this label's font again.
+        self._pt = 0
+        self._apply_fit()
+
+    def _apply_fit(self):
+        pt = TITLE_BASE_PT
+        avail = max(self.width() - 8, 60)
+        while pt > TITLE_MIN_PT:
+            fm = QFontMetrics(QFont("Segoe UI", pt, QFont.Bold))
+            if fm.horizontalAdvance(self.text()) <= avail:
+                break
+            pt -= 1
+        if pt != self._pt:
+            self._pt = pt
+            self.setStyleSheet(self._stylesheet(pt))
+
+    def _stylesheet(self, pt):
+        return (
+            f"background: {BRAND_NAVY}; color: {BRAND_WHITE}; "
+            f"font-size: {pt}pt; font-weight: bold; font-family: 'Segoe UI';"
+        )
+
+    def resizeEvent(self, event):
+        self._apply_fit()
+        super().resizeEvent(event)
+
+
 class FixedHeaderManagerQt:
     """Manages a navy header bar with centered title, left logo, red
     divider and a theme-toggle glyph. Attach to any QMainWindow/QWidget
@@ -113,27 +159,50 @@ class FixedHeaderManagerQt:
         outer.setContentsMargins(18, 9, 18, 9)
         outer.setSpacing(0)
 
-        # LEFT: logo
+        # LEFT: logo + divider, grouped in their own frame so its total width
+        # can be balanced against the right-side frame's width (see
+        # _rebalance_flanks) - otherwise the title's AlignCenter only centers
+        # it within whatever space is left between two DIFFERENTLY-sized
+        # flanks (a wide logo vs. a narrow theme-toggle glyph), so the title
+        # visibly sits off-center from the window's actual midpoint.
+        self.left_frame = QFrame()
+        self.left_frame.setObjectName("gfhHeader")
+        self.left_frame.setStyleSheet(f"background: {self.BRAND_NAVY};")
+        left_layout = QHBoxLayout(self.left_frame)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+
         self.logo_label = QLabel()
         self.logo_label.setObjectName("gfhHeader")
         self.logo_label.setStyleSheet(f"background: {self.BRAND_NAVY}; color: {self.BRAND_RED};")
         self.logo_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        outer.addWidget(self.logo_label, 0, Qt.AlignVCenter)
+        left_layout.addWidget(self.logo_label, 0, Qt.AlignVCenter)
 
         # Red vertical divider
         self.divider_frame = QFrame()
         self.divider_frame.setObjectName("gfhHeader")
         self.divider_frame.setFixedWidth(3)
         self.divider_frame.setStyleSheet(f"background: {self.BRAND_RED}; margin: 12px 0;")
-        outer.addSpacing(14)
-        outer.addWidget(self.divider_frame)
+        left_layout.addSpacing(14)
+        left_layout.addWidget(self.divider_frame)
+        # Any extra width _rebalance_flanks later gives this frame goes HERE
+        # (between the divider and the title), so logo+divider stay pinned
+        # to the header's left edge instead of drifting toward the middle.
+        left_layout.addStretch(1)
+        outer.addWidget(self.left_frame, 0, Qt.AlignVCenter)
 
         # CENTER: title - stretches to fill remaining space, text centered.
-        self.title_label = QLabel(title)
+        # font-size must be set in THIS widget's own stylesheet, not just via
+        # setFont(): theme_manager_qt.py's global QSS has `QWidget { font-size:
+        # 13px; }`, and Qt's stylesheet cascade always wins over setFont() for
+        # any property the app-wide stylesheet also sets on this widget - that
+        # 13px rule was silently overriding every setFont() size tried here.
+        # _TitleLabel additionally shrink-fits the point size to the label's
+        # width on every resize, so the headline never clips on narrower
+        # windows (base 32pt, floor TITLE_MIN_PT).
+        self.title_label = _TitleLabel(title)
         self.title_label.setObjectName("gfhHeader")
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet(f"background: {self.BRAND_NAVY}; color: {BRAND_WHITE};")
-        self.title_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
         outer.addWidget(self.title_label, 1)
 
         # RIGHT: theme toggle placeholder (added via add_theme_toggle)
@@ -167,8 +236,28 @@ class FixedHeaderManagerQt:
             if callback:
                 callback()
 
+        # Stretch BEFORE the glyph so it stays pinned to the header's right
+        # edge if _rebalance_flanks() below widens this frame - mirrors the
+        # stretch-AFTER-content on left_frame, which pins logo+divider left.
+        self.right_layout.addStretch(1)
         self.theme_toggle_glyph = ThemeToggleGlyph(theme_manager, toggle_and_callback, self.right_frame)
         self.right_layout.addWidget(self.theme_toggle_glyph, 0, Qt.AlignCenter)
+        self._rebalance_flanks()
+
+    def _rebalance_flanks(self):
+        """Force left_frame (logo+divider) and right_frame (theme toggle) to
+        the SAME width, whichever is naturally wider. Without this, the
+        title's AlignCenter only centers it within whatever space is left
+        between two differently-sized flanks (e.g. a wide logo vs. a narrow
+        toggle glyph), so the title visibly sits off the window's true
+        midpoint rather than looking centered."""
+        self.left_frame.setMinimumWidth(0)
+        self.left_frame.setMaximumWidth(16777215)
+        self.right_frame.setMinimumWidth(0)
+        self.right_frame.setMaximumWidth(16777215)
+        w = max(self.left_frame.sizeHint().width(), self.right_frame.sizeHint().width())
+        self.left_frame.setFixedWidth(w)
+        self.right_frame.setFixedWidth(w)
 
     def add_copyright(self, theme_manager, parent_layout):
         """Pinned navy footer bar with centered copyright text. Caller
