@@ -182,7 +182,7 @@ class FixedHeaderManagerQt:
         self.divider_frame = QFrame()
         self.divider_frame.setObjectName("gfhHeader")
         self.divider_frame.setFixedWidth(3)
-        self.divider_frame.setStyleSheet(f"background: {self.BRAND_RED}; margin: 12px 0;")
+        self.divider_frame.setStyleSheet(f"background: {self.BRAND_RED}; margin: 2px 0;")
         left_layout.addSpacing(14)
         left_layout.addWidget(self.divider_frame)
         # Any extra width _rebalance_flanks later gives this frame goes HERE
