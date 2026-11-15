@@ -446,6 +446,35 @@ def main():
         and d.split(".")[0] not in excluded_tops
         and importable(d)
     )
+    # importlib.util.find_spec() (importable()) has been observed to return
+    # False for these stdlib tkinter submodules on some build runners even
+    # though they are always present in a real Python 3 + tkinter install -
+    # a false negative here silently drops the submodule from hiddenimports,
+    # so the compiled EXE crashes at startup with e.g.
+    # "ImportError: cannot import name ttk". Force them in whenever the app
+    # actually imports them, instead of trusting the probe alone.
+    _ALWAYS_SAFE_TK_SUBMODULES = {
+        "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox",
+        "tkinter.scrolledtext", "tkinter.simpledialog", "tkinter.font",
+        "tkinter.colorchooser", "tkinter.commondialog",
+    }
+    # Deliberately does NOT apply the excluded_tops/local_tops filters: a
+    # repo's QT spec legitimately excludes 'tkinter' (Qt doesn't need it),
+    # but excluded_all/excluded_tops is pooled across EVERY spec in the repo
+    # (Tk + Qt), so that correct Qt-side exclusion was wrongly suppressing
+    # tkinter.ttk et al from ever reaching the Tk spec's hiddenimports too -
+    # this was the actual root cause of the shipped "cannot import name
+    # ttk" crash. These submodules are only ever meaningful under tkinter,
+    # so forcing them in has no effect on a build that truly excludes it.
+    _forced_tk = {
+        d for d in dotted_all
+        if d in _ALWAYS_SAFE_TK_SUBMODULES
+        and d not in compiled.values()
+    }
+    _missed = _forced_tk - set(verified)
+    if _missed:
+        log(f"force-including (importable() probe unreliable for these): {sorted(_missed)}")
+    verified = sorted(set(verified) | _forced_tk)
     log(f"verified module paths to bundle + pre-import ({len(verified)}):")
     for d in verified:
         log(f"  + {d}")
