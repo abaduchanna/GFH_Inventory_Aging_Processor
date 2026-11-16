@@ -3072,12 +3072,6 @@ def _vp_hide(win):
         win.attributes("-alpha", 0.0)
     except Exception:
         pass
-    try:
-        import pyi_splash  # type: ignore
-        pyi_splash.update_text("Loading interface...")
-    except Exception:
-        pass
-
 
 def _vp_reveal(win):
     """Show the finished window in one step (called just before the splash closes)."""
