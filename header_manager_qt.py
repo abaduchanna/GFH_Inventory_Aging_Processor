@@ -25,7 +25,7 @@ _HEADER_MANAGER_QT_VERSION = "1.1.0"
 # Converter" in an 1100px window) clip-proof while short titles keep the
 # full 32pt headline look.
 TITLE_BASE_PT = 32
-TITLE_MIN_PT = 15
+TITLE_MIN_PT = 12
 
 BRAND_NAVY = "#090d26"
 BRAND_RED = "#e83030"
@@ -104,6 +104,9 @@ class _TitleLabel(QLabel):
 
     def __init__(self, text):
         super().__init__(text)
+        # Keep the ORIGINAL title: _apply_fit may replace the visible text
+        # with an elided ("...") copy once the point-size floor is reached.
+        self._full = text
         # _pt starts at 0 so the first _apply_fit() ALWAYS writes the
         # stylesheet - if the very first width already fit 32pt, skipping the
         # write would leave the app-wide QSS `QWidget { font-size: 13px; }`
@@ -116,12 +119,19 @@ class _TitleLabel(QLabel):
         avail = max(self.width() - 8, 60)
         while pt > TITLE_MIN_PT:
             fm = QFontMetrics(QFont("Segoe UI", pt, QFont.Bold))
-            if fm.horizontalAdvance(self.text()) <= avail:
+            if fm.horizontalAdvance(self._full) <= avail:
                 break
             pt -= 1
+        # At the size floor: elide instead of clipping mid-word.
+        fm = QFontMetrics(QFont("Segoe UI", pt, QFont.Bold))
+        shown = self._full
+        if fm.horizontalAdvance(self._full) > avail:
+            shown = fm.elidedText(self._full, Qt.ElideRight, max(avail, 40))
         if pt != self._pt:
             self._pt = pt
             self.setStyleSheet(self._stylesheet(pt))
+        if self.text() != shown:
+            self.setText(shown)
 
     def _stylesheet(self, pt):
         return (

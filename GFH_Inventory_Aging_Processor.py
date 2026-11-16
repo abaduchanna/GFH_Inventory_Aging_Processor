@@ -2413,6 +2413,33 @@ class App:
         except Exception:
             pass
         self._wa_theme_fixups(colors)
+        self._entry_theme_fixups()
+
+    def _entry_theme_fixups(self):
+        """Re-color chrome the shared theme walk does not touch:
+        Entry readonlybackground/highlightbackground and LabelFrame
+        highlightbackground (hardcoded steel-blue survived dark toggle)."""
+        import tkinter as tk
+        colors = self.theme_manager.get_colors()
+        input_bg = colors.get("input", "#ffffff")
+        border = colors.get("border", "#d5d9e5")
+
+        def _fix(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, tk.Entry):
+                    try:
+                        child.configure(readonlybackground=input_bg,
+                                        highlightbackground=border)
+                    except Exception:
+                        pass
+                elif isinstance(child, tk.LabelFrame):
+                    try:
+                        child.configure(highlightbackground=border)
+                    except Exception:
+                        pass
+                _fix(child)
+
+        _fix(self.root)
 
     def _wa_theme_fixups(self, colors=None):
         """Re-color the WhatsApp tab's "brand"-tagged widgets (the ones the

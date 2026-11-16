@@ -15,7 +15,7 @@ import os
 from datetime import datetime
 
 
-_THEME_MANAGER_QT_VERSION = "1.0.0"
+_THEME_MANAGER_QT_VERSION = "1.1.1"
 
 
 class ThemeManagerQt:
@@ -218,6 +218,18 @@ class ThemeManagerQt:
     def apply_theme_to_app(self, app):
         """Apply the current theme's stylesheet app-wide (QApplication)."""
         app.setStyleSheet(self.build_qss())
+        # QApplication.setStyleSheet() does not reliably re-polish ALREADY
+        # RENDERED QAbstractScrollArea-based widgets (QTableWidget,
+        # QTreeWidget, QPlainTextEdit) or QGroupBox on every platform -
+        # force an explicit unpolish+polish on every widget so the new
+        # stylesheet repaints everywhere, not just on plain QWidget/QPushButton.
+        try:
+            for w in app.allWidgets():
+                w.style().unpolish(w)
+                w.style().polish(w)
+                w.update()
+        except Exception:
+            pass
         try:
             from native_titlebar_qt import sync_titlebar_qt
             for w in app.topLevelWidgets():
