@@ -2774,6 +2774,15 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         self.theme_manager.apply_theme_to_app(QApplication.instance())
         self.header_mgr.update_for_theme()
+        # Log console follows the theme, like the Tk build (its theme walk
+        # recolors Text widgets); a fixed dark box ignored light mode.
+        colors = self.theme_manager.get_colors()
+        for _name in ("log_box", "wa_log_box",):
+            _log_widget = getattr(self, _name, None)
+            if _log_widget is not None:
+                _log_widget.setStyleSheet(
+                    f"background: {colors['log_bg']}; color: {colors['log_fg']}; "
+                    "font-family: Consolas;")
 
 
 # ==========================================================

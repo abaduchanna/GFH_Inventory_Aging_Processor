@@ -12,7 +12,12 @@ import os
 
 
 GA_ROOT = 2
-SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0020 | 0x0040
+# NOSIZE | NOMOVE | NOZORDER | FRAMECHANGED. Deliberately NOT SWP_SHOWWINDOW
+# (0x0040): the theme manager syncs every top-level widget, including ones
+# that are still hidden (a tab page not added to the tab bar, a dialog that
+# is built but not opened). SWP_SHOWWINDOW forced those onto the screen as
+# a blank window titled with the EXE name.
+SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0020
 
 
 def _colourref(value: str) -> int:
@@ -63,6 +68,14 @@ def sync_titlebar_qt(window, dark: bool) -> None:
     """
     if os.name != "nt":
         return
+    try:
+        # Only real windows/dialogs have a title bar. Combo-box popups,
+        # menus and tooltips are top-level widgets too - leave them alone.
+        from PySide6.QtCore import Qt
+        if window.windowType() not in (Qt.Window, Qt.Dialog):
+            return
+    except Exception:
+        pass
     try:
         hwnd = int(window.winId())
         _apply(hwnd, dark)
