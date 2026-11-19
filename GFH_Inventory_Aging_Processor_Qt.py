@@ -2836,8 +2836,11 @@ def main():
     app = QApplication(sys.argv)
     from boot_splash_qt import show_boot_splash
     _boot = show_boot_splash("#e83030")
+    _boot.set_progress(15, "Loading modules...")
     _check_required_packages(app)
+    _boot.set_progress(40, "Loading interface...")
     win = MainWindow()
+    _boot.set_progress(88, "Preparing window...")
     win.show()
     _boot.finish(win)
     _close_pyi_splash()
